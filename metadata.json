@@ -1,0 +1,5 @@
+{
+  "name": "Productos Químicos",
+  "description": "Tienda online de productos químicos (desodorantes, jabones líquidos, aromatizantes) con panel de gestión de inventario, pedidos y personalización de marca. Una tienda por licencia, sobre la base segura del ecosistema CyC (Supabase + Auth + RLS).",
+  "requestFramePermissions": ["notification"]
+}

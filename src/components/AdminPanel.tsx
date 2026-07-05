@@ -313,48 +313,49 @@ export default function AdminPanel({
     return tenantOrders.filter(o => o.status === 'completed');
   }, [tenantOrders]);
 
-  // Dashboard Metrics
+  // Dashboard Metrics — cuentan TODOS los pedidos activos (no cancelados),
+  // así un encargo nuevo se ve al instante.
+  const ventasOrders = useMemo(() => {
+    return tenantOrders.filter(o => o.status !== 'cancelled');
+  }, [tenantOrders]);
+
   const totalRevenue = useMemo(() => {
-    return completedOrders.reduce((acc, curr) => acc + curr.total, 0);
-  }, [completedOrders]);
+    return ventasOrders.reduce((acc, curr) => acc + curr.total, 0);
+  }, [ventasOrders]);
 
   const averageOrderValue = useMemo(() => {
-    if (completedOrders.length === 0) return 0;
-    return Math.round(totalRevenue / completedOrders.length);
-  }, [completedOrders, totalRevenue]);
+    if (ventasOrders.length === 0) return 0;
+    return Math.round(totalRevenue / ventasOrders.length);
+  }, [ventasOrders, totalRevenue]);
 
-  // Weekly and Monthly charts data computation
-  // Let's map real order dates into simplified buckets for visual rendering
+  // Ventas de la semana (Lun→Dom) con datos reales (sin relleno)
   const weeklySalesData = useMemo(() => {
-    // Return daily values for the current week: Lu, Ma, Mi, Ju, Vi, Sa, Do
     const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    const values = [12000, 18500, 8000, 24000, 32000, 41000, 15000]; // Seed baseline
-    
-    // Sum real orders from the last 7 days dynamically
-    completedOrders.forEach(order => {
+    const values = [0, 0, 0, 0, 0, 0, 0];
+    ventasOrders.forEach(order => {
       const date = new Date(order.createdAt);
-      const dayIndex = (date.getDay() + 6) % 7; // Convert Sun-Sat to Mon-Sun
+      const dayIndex = (date.getDay() + 6) % 7; // Lun=0 … Dom=6
       values[dayIndex] += order.total;
     });
-
     return days.map((day, i) => ({ day, sales: values[i] }));
-  }, [completedOrders]);
+  }, [ventasOrders]);
 
+  // Tendencia de los últimos 6 meses reales, terminando en el mes actual
   const monthlySalesData = useMemo(() => {
-    // Monthly buckets for the past 6 months
-    const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun'];
-    const values = [95000, 110000, 135000, 150000, 180000, 140000]; // Seed baseline
-    
-    completedOrders.forEach(order => {
+    const nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const now = new Date();
+    const buckets: { y: number; m: number; month: string; sales: number }[] = [];
+    for (let k = 5; k >= 0; k--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+      buckets.push({ y: d.getFullYear(), m: d.getMonth(), month: nombres[d.getMonth()], sales: 0 });
+    }
+    ventasOrders.forEach(order => {
       const date = new Date(order.createdAt);
-      const monthIdx = date.getMonth(); // 0-11
-      if (monthIdx < 6) {
-        values[monthIdx] += order.total;
-      }
+      const b = buckets.find(bk => bk.y === date.getFullYear() && bk.m === date.getMonth());
+      if (b) b.sales += order.total;
     });
-
-    return months.map((month, i) => ({ month, sales: values[i] }));
-  }, [completedOrders]);
+    return buckets.map(b => ({ month: b.month, sales: b.sales }));
+  }, [ventasOrders]);
 
   // Filter lists based on searches
   const filteredProducts = useMemo(() => {
@@ -1032,11 +1033,13 @@ export default function AdminPanel({
                   </div>
 
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Pedidos Concluidos</span>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Pedidos</span>
                     <h3 className="text-xl font-black mt-1 text-slate-100">
-                      {completedOrders.length}
+                      {tenantOrders.length}
                     </h3>
-                    <p className="text-[10px] text-slate-400 mt-1">De un total de {tenantOrders.length}</p>
+                    <p className="text-[10px] text-amber-400 mt-1">
+                      {pendingOrders.length} pendiente{pendingOrders.length === 1 ? '' : 's'} · {completedOrders.length} concluido{completedOrders.length === 1 ? '' : 's'}
+                    </p>
                   </div>
 
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">

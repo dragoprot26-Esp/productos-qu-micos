@@ -73,16 +73,20 @@ export default function PublicPage({
     return products.filter(p => p.tenantId === tenant.id);
   }, [products, tenant.id]);
 
-  // Extract unique categories for this tenant's products
+  // Extract unique categories for this tenant's products.
+  // "Todos" y (si hay ofertas) "🔥 Ofertas" van primero, como pestañas.
   const categories = useMemo(() => {
     const cats = new Set<string>();
     tenantProducts.forEach(p => cats.add(p.category));
-    return ['Todos', ...Array.from(cats)];
+    const base = ['Todos'];
+    if (tenantProducts.some(p => p.isPromo)) base.push('🔥 Ofertas');
+    return [...base, ...Array.from(cats)];
   }, [tenantProducts]);
 
-  // Filter products by selected category
+  // Filter products by selected category (con pestaña especial de ofertas)
   const filteredProducts = useMemo(() => {
     if (selectedCategory === 'Todos') return tenantProducts;
+    if (selectedCategory === '🔥 Ofertas') return tenantProducts.filter(p => p.isPromo);
     return tenantProducts.filter(p => p.category === selectedCategory);
   }, [tenantProducts, selectedCategory]);
 
@@ -374,125 +378,7 @@ export default function PublicPage({
 
       <main className="max-w-6xl mx-auto px-4 py-4">
         
-        {/* 3. PROMOTIONS & SPECIAL OFFERS SECTION */}
-        {promoProducts.length > 0 && (
-          <div className="mb-10" id="promotions-section">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-lg">🔥</span>
-              <h3 className="text-lg font-bold text-slate-800 tracking-tight">
-                Ofertas Especiales y Promociones
-              </h3>
-              <span className="text-xs bg-red-100 text-red-600 font-bold px-2 py-0.5 rounded-full">
-                ¡Precios Locos!
-              </span>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {promoProducts.map(product => {
-                const qtyInCart = cart[product.id] || 0;
-                return (
-                  <div 
-                    key={product.id}
-                    className="bg-gradient-to-br from-red-50/50 to-amber-50/50 rounded-xl border border-red-100 p-4 shadow-sm relative hover:shadow-md transition-all flex flex-col justify-between"
-                  >
-                    <span className="absolute top-3 right-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm z-10">
-                      PROMO
-                    </span>
-                    
-                    <div className="flex gap-4">
-                      {/* Product Image */}
-                      <div className="w-20 h-20 rounded-lg overflow-hidden bg-white border border-slate-100 shrink-0 relative">
-                        <img 
-                          src={product.imageUrl} 
-                          alt={product.name} 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                      
-                      {/* Product Text details */}
-                      <div className="flex-1">
-                        <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">
-                          {product.category}
-                        </span>
-                        <h4 className="text-sm font-bold text-slate-800 line-clamp-1 mt-0.5">
-                          {product.name}
-                        </h4>
-                        <p className="text-xs text-slate-500 line-clamp-2 mt-0.5 leading-snug">
-                          {product.description}
-                        </p>
-                        
-                        {/* Custom Attributes / Dynamic Fields */}
-                        {product.customFields && product.customFields.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2 max-h-12 overflow-y-auto">
-                            {product.customFields.map((field, idx) => (
-                              <span key={idx} className="bg-amber-100/60 text-amber-900 text-[8.5px] px-1.5 py-0.5 rounded border border-amber-200/50 leading-tight">
-                                <strong>{field.key}:</strong> {field.value}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        
-                        <div className="flex items-baseline gap-2 mt-2">
-                          <span className="text-base font-black text-slate-800">
-                            ${product.promoPrice}
-                          </span>
-                          <span className="text-xs text-slate-400 line-through">
-                            ${product.price}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            / {product.unit}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Quantity selectors */}
-                    <div className="flex items-center justify-between border-t border-red-100/50 pt-3 mt-3">
-                      <span className="text-xs text-slate-500">
-                        Disponibles: <strong className="text-slate-700">{product.stock}</strong>
-                      </span>
-                      
-                      {qtyInCart === 0 ? (
-                        <button
-                          onClick={() => handleUpdateQty(product.id, 1)}
-                          disabled={product.stock <= 0}
-                          className={`px-3 py-1 text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1 shadow-sm transition-colors ${
-                            product.stock <= 0 
-                              ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                              : 'bg-red-600 hover:bg-red-700 text-white'
-                          }`}
-                        >
-                          <Plus className="w-3 h-3" /> Añadir
-                        </button>
-                      ) : (
-                        <div className="flex items-center gap-2 bg-white rounded-lg border border-red-200 p-0.5 shadow-sm">
-                          <button 
-                            onClick={() => handleUpdateQty(product.id, -1)}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="text-xs font-bold px-1 text-slate-800 min-w-[16px] text-center">
-                            {qtyInCart}
-                          </span>
-                          <button 
-                            onClick={() => handleUpdateQty(product.id, 1)}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 4. PRODUCT LIST WITH FILTERS */}
+        {/* 3. CATÁLOGO CON PESTAÑAS (Todos · 🔥 Ofertas · categorías) */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           
           {/* Header & Categories */}

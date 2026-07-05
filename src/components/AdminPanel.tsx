@@ -173,6 +173,40 @@ export default function AdminPanel({
     setProdCategory(rest[0] || '');
     showAdminToast(`Categoría «${cat}» quitada.`, 'success');
   };
+
+  // ── Unidades de medida configurables (mismo patrón que categorías) ────
+  const [extraUnits, setExtraUnits] = useState<string[]>([]);
+  const [removedUnits, setRemovedUnits] = useState<string[]>([]);
+
+  const unitOptions = useMemo(() => {
+    const base = ['Litro', '5 Litros', '500ml', 'Unidad'];
+    const fromProducts = products.map(p => p.unit).filter(Boolean);
+    return Array.from(new Set([...base, ...fromProducts, ...extraUnits]))
+      .filter(u => !(removedUnits.includes(u) && !fromProducts.includes(u)));
+  }, [products, extraUnits, removedUnits]);
+
+  const handleAddUnit = () => {
+    const name = (window.prompt('Escribí la nueva unidad de medida (ej. Kg, 250ml, Docena):') || '').trim();
+    if (!name) return;
+    setRemovedUnits(prev => prev.filter(u => u !== name));
+    if (!unitOptions.includes(name)) setExtraUnits(prev => [...prev, name]);
+    setProdUnit(name);
+  };
+
+  const handleRemoveUnit = () => {
+    const u = prodUnit;
+    if (!u) return;
+    const enUso = products.filter(p => p.unit === u).length;
+    if (enUso > 0) {
+      showAdminToast(`No podés quitar «${u}»: tiene ${enUso} producto(s). Cambiáles la unidad primero.`, 'error');
+      return;
+    }
+    setExtraUnits(prev => prev.filter(x => x !== u));
+    setRemovedUnits(prev => (prev.includes(u) ? prev : [...prev, u]));
+    const rest = unitOptions.filter(x => x !== u);
+    setProdUnit(rest[0] || '');
+    showAdminToast(`Unidad «${u}» quitada.`, 'success');
+  };
   const [prodPrice, setProdPrice] = useState(0);
   const [prodStock, setProdStock] = useState(10);
   const [prodUnit, setProdUnit] = useState('Litro');
@@ -2278,17 +2312,34 @@ export default function AdminPanel({
 
                 <div className="space-y-1">
                   <label htmlFor="modal-prod-unit" className="text-xs font-semibold text-slate-400 block">Unidad de Medida *</label>
-                  <select
-                    id="modal-prod-unit"
-                    value={prodUnit}
-                    onChange={(e) => setProdUnit(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
-                  >
-                    <option value="Litro">Litro</option>
-                    <option value="5 Litros">Bidón 5 Litros</option>
-                    <option value="500ml">Botella 500ml</option>
-                    <option value="Unidad">Unidad (Difusor/Fragancia)</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      id="modal-prod-unit"
+                      value={prodUnit}
+                      onChange={(e) => setProdUnit(e.target.value)}
+                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
+                    >
+                      {unitOptions.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddUnit}
+                      title="Agregar nueva unidad de medida"
+                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer transition-colors shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveUnit}
+                      title="Quitar la unidad seleccionada (si no tiene productos)"
+                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white border border-slate-700 rounded-lg cursor-pointer transition-colors shadow-sm"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2302,8 +2353,9 @@ export default function AdminPanel({
                     required
                     min="1"
                     placeholder="Ej. 1800"
-                    value={prodPrice}
-                    onChange={(e) => setProdPrice(Number(e.target.value))}
+                    value={prodPrice === 0 ? '' : prodPrice}
+                    onChange={(e) => setProdPrice(e.target.value === '' ? 0 : Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none font-mono"
                   />
                 </div>
@@ -2316,8 +2368,9 @@ export default function AdminPanel({
                     required
                     min="0"
                     placeholder="Ej. 50"
-                    value={prodStock}
-                    onChange={(e) => setProdStock(Number(e.target.value))}
+                    value={prodStock === 0 ? '' : prodStock}
+                    onChange={(e) => setProdStock(e.target.value === '' ? 0 : Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none font-mono"
                   />
                 </div>
@@ -2348,8 +2401,9 @@ export default function AdminPanel({
                       required={prodIsPromo}
                       min="1"
                       placeholder="Ej. 1400"
-                      value={prodPromoPrice}
-                      onChange={(e) => setProdPromoPrice(Number(e.target.value))}
+                      value={prodPromoPrice === 0 ? '' : prodPromoPrice}
+                      onChange={(e) => setProdPromoPrice(e.target.value === '' ? 0 : Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none font-mono"
                     />
                   </div>

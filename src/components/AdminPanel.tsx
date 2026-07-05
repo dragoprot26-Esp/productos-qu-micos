@@ -137,6 +137,42 @@ export default function AdminPanel({
   // Product Form Fields
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Jabones Líquidos');
+  // Categorías que el dueño agrega manualmente con el botón "+"
+  const [extraCategories, setExtraCategories] = useState<string[]>([]);
+  // Categorías (sin productos) que el dueño decidió ocultar con el botón 🗑
+  const [removedCategories, setRemovedCategories] = useState<string[]>([]);
+
+  // Lista completa de categorías: base + las de productos ya cargados + las nuevas.
+  // Una categoría oculta reaparece si algún producto vuelve a usarla.
+  const categoryOptions = useMemo(() => {
+    const base = ['Jabones Líquidos', 'Desodorantes y Aromatizantes', 'Limpiadores Generales', 'Lavandería'];
+    const fromProducts = products.map(p => p.category).filter(Boolean);
+    return Array.from(new Set([...base, ...fromProducts, ...extraCategories]))
+      .filter(c => !(removedCategories.includes(c) && !fromProducts.includes(c)));
+  }, [products, extraCategories, removedCategories]);
+
+  const handleAddCategory = () => {
+    const name = (window.prompt('Escribí el nombre de la nueva categoría:') || '').trim();
+    if (!name) return;
+    setRemovedCategories(prev => prev.filter(c => c !== name));
+    if (!categoryOptions.includes(name)) setExtraCategories(prev => [...prev, name]);
+    setProdCategory(name);
+  };
+
+  const handleRemoveCategory = () => {
+    const cat = prodCategory;
+    if (!cat) return;
+    const enUso = products.filter(p => p.category === cat).length;
+    if (enUso > 0) {
+      showAdminToast(`No podés quitar «${cat}»: tiene ${enUso} producto(s). Cambiáles la categoría primero.`, 'error');
+      return;
+    }
+    setExtraCategories(prev => prev.filter(c => c !== cat));
+    setRemovedCategories(prev => (prev.includes(cat) ? prev : [...prev, cat]));
+    const rest = categoryOptions.filter(c => c !== cat);
+    setProdCategory(rest[0] || '');
+    showAdminToast(`Categoría «${cat}» quitada.`, 'success');
+  };
   const [prodPrice, setProdPrice] = useState(0);
   const [prodStock, setProdStock] = useState(10);
   const [prodUnit, setProdUnit] = useState('Litro');
@@ -2210,17 +2246,34 @@ export default function AdminPanel({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label htmlFor="modal-prod-category" className="text-xs font-semibold text-slate-400 block">Categoría *</label>
-                  <select
-                    id="modal-prod-category"
-                    value={prodCategory}
-                    onChange={(e) => setProdCategory(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
-                  >
-                    <option value="Jabones Líquidos">Jabones Líquidos</option>
-                    <option value="Desodorantes y Aromatizantes">Desodorantes y Aromatizantes</option>
-                    <option value="Limpiadores Generales">Limpiadores Generales</option>
-                    <option value="Lavandería">Lavandería</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      id="modal-prod-category"
+                      value={prodCategory}
+                      onChange={(e) => setProdCategory(e.target.value)}
+                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
+                    >
+                      {categoryOptions.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      title="Agregar nueva categoría"
+                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer transition-colors shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveCategory}
+                      title="Quitar la categoría seleccionada (si no tiene productos)"
+                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white border border-slate-700 rounded-lg cursor-pointer transition-colors shadow-sm"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1">

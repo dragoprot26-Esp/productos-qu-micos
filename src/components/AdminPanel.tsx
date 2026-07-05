@@ -707,7 +707,7 @@ export default function AdminPanel({
     <div className={`${adminThemeClass} transition-colors duration-300 font-sans`}>
       
       {/* 1. ADMIN HEADER BAR */}
-      <header className="bg-slate-900 text-slate-100 py-3.5 px-6 border-b border-slate-800 flex flex-wrap gap-4 items-center justify-between sticky top-[53px] z-30 shadow-sm">
+      <header className="bg-slate-900 text-slate-100 py-3.5 px-6 border-b border-slate-800 flex flex-wrap gap-4 items-center justify-between sticky top-0 z-30 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-1.5 bg-indigo-500/10 text-indigo-400 rounded-md border border-indigo-500/20">
             <Settings className="w-5 h-5 animate-spin-slow" />

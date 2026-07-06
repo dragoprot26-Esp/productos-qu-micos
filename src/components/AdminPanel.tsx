@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Tenant, Product, Order, Client, AppNotification, AdminTab, Collaborator } from '../types';
 import { THEME_PRESETS, FONT_PRESETS } from '../data';
-import { validarLicencia, asegurarCuentaSeguraDueno, asegurarCuentaSeguraColab } from '../db/cloud';
 import { 
   BarChart3, 
   Layers, 
@@ -56,8 +55,8 @@ interface AdminPanelProps {
   onClearNotifications: () => void;
   onTogglePreviewMode?: () => void;
   isLoggedIn: boolean;
-  loggedInUser: { role: 'admin' | 'colaborador'; username: string; name: string; codigo?: string } | null;
-  onLogin: (user: { role: 'admin' | 'colaborador'; username: string; name: string; codigo: string }) => void;
+  loggedInUser: { role: 'admin' | 'colaborador'; username: string; name: string } | null;
+  onLogin: (user: { role: 'admin' | 'colaborador'; username: string; name: string }) => void;
   onLogout: () => void;
 }
 
@@ -121,7 +120,6 @@ export default function AdminPanel({
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
 
   // --- COLLABORATORS FORM STATE ---
   const [colabName, setColabName] = useState('');
@@ -137,76 +135,6 @@ export default function AdminPanel({
   // Product Form Fields
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Jabones Líquidos');
-  // Categorías que el dueño agrega manualmente con el botón "+"
-  const [extraCategories, setExtraCategories] = useState<string[]>([]);
-  // Categorías (sin productos) que el dueño decidió ocultar con el botón 🗑
-  const [removedCategories, setRemovedCategories] = useState<string[]>([]);
-
-  // Lista completa de categorías: base + las de productos ya cargados + las nuevas.
-  // Una categoría oculta reaparece si algún producto vuelve a usarla.
-  const categoryOptions = useMemo(() => {
-    const base = ['Jabones Líquidos', 'Desodorantes y Aromatizantes', 'Limpiadores Generales', 'Lavandería'];
-    const fromProducts = products.map(p => p.category).filter(Boolean);
-    return Array.from(new Set([...base, ...fromProducts, ...extraCategories]))
-      .filter(c => !(removedCategories.includes(c) && !fromProducts.includes(c)));
-  }, [products, extraCategories, removedCategories]);
-
-  const handleAddCategory = () => {
-    const name = (window.prompt('Escribí el nombre de la nueva categoría:') || '').trim();
-    if (!name) return;
-    setRemovedCategories(prev => prev.filter(c => c !== name));
-    if (!categoryOptions.includes(name)) setExtraCategories(prev => [...prev, name]);
-    setProdCategory(name);
-  };
-
-  const handleRemoveCategory = () => {
-    const cat = prodCategory;
-    if (!cat) return;
-    const enUso = products.filter(p => p.category === cat).length;
-    if (enUso > 0) {
-      showAdminToast(`No podés quitar «${cat}»: tiene ${enUso} producto(s). Cambiáles la categoría primero.`, 'error');
-      return;
-    }
-    setExtraCategories(prev => prev.filter(c => c !== cat));
-    setRemovedCategories(prev => (prev.includes(cat) ? prev : [...prev, cat]));
-    const rest = categoryOptions.filter(c => c !== cat);
-    setProdCategory(rest[0] || '');
-    showAdminToast(`Categoría «${cat}» quitada.`, 'success');
-  };
-
-  // ── Unidades de medida configurables (mismo patrón que categorías) ────
-  const [extraUnits, setExtraUnits] = useState<string[]>([]);
-  const [removedUnits, setRemovedUnits] = useState<string[]>([]);
-
-  const unitOptions = useMemo(() => {
-    const base = ['Litro', '5 Litros', '500ml', 'Unidad'];
-    const fromProducts = products.map(p => p.unit).filter(Boolean);
-    return Array.from(new Set([...base, ...fromProducts, ...extraUnits]))
-      .filter(u => !(removedUnits.includes(u) && !fromProducts.includes(u)));
-  }, [products, extraUnits, removedUnits]);
-
-  const handleAddUnit = () => {
-    const name = (window.prompt('Escribí la nueva unidad de medida (ej. Kg, 250ml, Docena):') || '').trim();
-    if (!name) return;
-    setRemovedUnits(prev => prev.filter(u => u !== name));
-    if (!unitOptions.includes(name)) setExtraUnits(prev => [...prev, name]);
-    setProdUnit(name);
-  };
-
-  const handleRemoveUnit = () => {
-    const u = prodUnit;
-    if (!u) return;
-    const enUso = products.filter(p => p.unit === u).length;
-    if (enUso > 0) {
-      showAdminToast(`No podés quitar «${u}»: tiene ${enUso} producto(s). Cambiáles la unidad primero.`, 'error');
-      return;
-    }
-    setExtraUnits(prev => prev.filter(x => x !== u));
-    setRemovedUnits(prev => (prev.includes(u) ? prev : [...prev, u]));
-    const rest = unitOptions.filter(x => x !== u);
-    setProdUnit(rest[0] || '');
-    showAdminToast(`Unidad «${u}» quitada.`, 'success');
-  };
   const [prodPrice, setProdPrice] = useState(0);
   const [prodStock, setProdStock] = useState(10);
   const [prodUnit, setProdUnit] = useState('Litro');
@@ -244,7 +172,7 @@ export default function AdminPanel({
   // Notifications bell toggle
   const [isNotifOpen, setIsNotifOpen] = useState(false);
 
-  // Auto-cierre del panel de notificaciones a los 3 segundos de abrirlo
+  // Auto-close notification panel after 7 seconds of inactivity
   const notifTimeoutRef = useRef<any>(null);
 
   const startNotifTimer = useCallback(() => {
@@ -253,7 +181,7 @@ export default function AdminPanel({
     }
     notifTimeoutRef.current = setTimeout(() => {
       setIsNotifOpen(false);
-    }, 3000);
+    }, 7000);
   }, []);
 
   const clearNotifTimer = useCallback(() => {
@@ -313,49 +241,48 @@ export default function AdminPanel({
     return tenantOrders.filter(o => o.status === 'completed');
   }, [tenantOrders]);
 
-  // Dashboard Metrics — cuentan TODOS los pedidos activos (no cancelados),
-  // así un encargo nuevo se ve al instante.
-  const ventasOrders = useMemo(() => {
-    return tenantOrders.filter(o => o.status !== 'cancelled');
-  }, [tenantOrders]);
-
+  // Dashboard Metrics
   const totalRevenue = useMemo(() => {
-    return ventasOrders.reduce((acc, curr) => acc + curr.total, 0);
-  }, [ventasOrders]);
+    return completedOrders.reduce((acc, curr) => acc + curr.total, 0);
+  }, [completedOrders]);
 
   const averageOrderValue = useMemo(() => {
-    if (ventasOrders.length === 0) return 0;
-    return Math.round(totalRevenue / ventasOrders.length);
-  }, [ventasOrders, totalRevenue]);
+    if (completedOrders.length === 0) return 0;
+    return Math.round(totalRevenue / completedOrders.length);
+  }, [completedOrders, totalRevenue]);
 
-  // Ventas de la semana (Lun→Dom) con datos reales (sin relleno)
+  // Weekly and Monthly charts data computation
+  // Let's map real order dates into simplified buckets for visual rendering
   const weeklySalesData = useMemo(() => {
+    // Return daily values for the current week: Lu, Ma, Mi, Ju, Vi, Sa, Do
     const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    const values = [0, 0, 0, 0, 0, 0, 0];
-    ventasOrders.forEach(order => {
+    const values = [12000, 18500, 8000, 24000, 32000, 41000, 15000]; // Seed baseline
+    
+    // Sum real orders from the last 7 days dynamically
+    completedOrders.forEach(order => {
       const date = new Date(order.createdAt);
-      const dayIndex = (date.getDay() + 6) % 7; // Lun=0 … Dom=6
+      const dayIndex = (date.getDay() + 6) % 7; // Convert Sun-Sat to Mon-Sun
       values[dayIndex] += order.total;
     });
-    return days.map((day, i) => ({ day, sales: values[i] }));
-  }, [ventasOrders]);
 
-  // Tendencia de los últimos 6 meses reales, terminando en el mes actual
+    return days.map((day, i) => ({ day, sales: values[i] }));
+  }, [completedOrders]);
+
   const monthlySalesData = useMemo(() => {
-    const nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-    const now = new Date();
-    const buckets: { y: number; m: number; month: string; sales: number }[] = [];
-    for (let k = 5; k >= 0; k--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
-      buckets.push({ y: d.getFullYear(), m: d.getMonth(), month: nombres[d.getMonth()], sales: 0 });
-    }
-    ventasOrders.forEach(order => {
+    // Monthly buckets for the past 6 months
+    const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun'];
+    const values = [95000, 110000, 135000, 150000, 180000, 140000]; // Seed baseline
+    
+    completedOrders.forEach(order => {
       const date = new Date(order.createdAt);
-      const b = buckets.find(bk => bk.y === date.getFullYear() && bk.m === date.getMonth());
-      if (b) b.sales += order.total;
+      const monthIdx = date.getMonth(); // 0-11
+      if (monthIdx < 6) {
+        values[monthIdx] += order.total;
+      }
     });
-    return buckets.map(b => ({ month: b.month, sales: b.sales }));
-  }, [ventasOrders]);
+
+    return months.map((month, i) => ({ month, sales: values[i] }));
+  }, [completedOrders]);
 
   // Filter lists based on searches
   const filteredProducts = useMemo(() => {
@@ -457,49 +384,52 @@ export default function AdminPanel({
     setIsProductModalOpen(false);
   };
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
 
-    const codigo = licenseInput.trim().toUpperCase();
-    const usuario = usernameInput.trim();
-    const pass = passwordInput;
+    const validLicenses: Record<string, string[]> = {
+      'eco-quimica': ['LIC-ECO-123', '123456'],
+      'aroma-brillo': ['LIC-AROMA-456', '123456'],
+      'quimica-industrial': ['LIC-NORTE-789', '123456']
+    };
 
-    if (!codigo || !usuario || !pass) {
-      setLoginError('Completá licencia, usuario y contraseña.');
+    const allowed = validLicenses[tenant.id] || ['123456'];
+    const typedLic = licenseInput.trim().toUpperCase();
+
+    if (!allowed.includes(typedLic) && typedLic !== '123456') {
+      setLoginError(`Licencia inválida para ${tenant.name}. (Sugerencia: use la licencia mostrada abajo)`);
       return;
     }
 
-    setLoginLoading(true);
-    try {
-      // 1) La licencia debe existir, estar activa y no vencida
-      const lic = await validarLicencia(codigo);
-      if (!lic) {
-        setLoginError('Licencia inválida, inexistente o vencida.');
-        return;
+    if (loginRole === 'admin') {
+      if (usernameInput.trim().toLowerCase() === 'admin' && passwordInput === 'admin') {
+        onLogin({
+          role: 'admin',
+          username: 'admin',
+          name: 'Administrador Principal'
+        });
+      } else {
+        setLoginError('Usuario o contraseña de Administrador incorrectos. (Sugeridos: admin / admin)');
       }
+    } else {
+      // Find collaborator
+      const colab = collaborators.find(c => 
+        c.tenantId === tenant.id && 
+        c.username.toLowerCase() === usernameInput.trim().toLowerCase() && 
+        c.password === passwordInput
+      );
 
-      // 2) Cuenta segura real (Supabase Auth) según rol
-      const res = loginRole === 'admin'
-        ? await asegurarCuentaSeguraDueno(usuario, pass, codigo)
-        : await asegurarCuentaSeguraColab(usuario, pass, codigo);
-
-      if (!res.ok) {
-        setLoginError(res.msg || 'No se pudo iniciar sesión.');
-        return;
+      if (colab) {
+        onLogin({
+          role: 'colaborador',
+          username: colab.username,
+          name: colab.name
+        });
+        setActiveTab('orders'); // Go directly to orders
+      } else {
+        setLoginError('Colaborador no registrado o credenciales incorrectas para esta sucursal.');
       }
-
-      onLogin({
-        role: loginRole,
-        username: usuario,
-        name: usuario,
-        codigo,
-      });
-      if (loginRole === 'colaborador') setActiveTab('orders');
-    } catch (err: any) {
-      setLoginError('Error de conexión: ' + (err?.message || err));
-    } finally {
-      setLoginLoading(false);
     }
   };
 
@@ -666,7 +596,7 @@ export default function AdminPanel({
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                🏭 Dueño
+                🔐 Administrador
               </button>
               <button
                 type="button"
@@ -684,6 +614,28 @@ export default function AdminPanel({
               </button>
             </div>
 
+            {/* Tenant selection dropdown inside login */}
+            <div className="space-y-1">
+              <label htmlFor="login-tenant-select" className="text-[11px] font-semibold text-slate-400 block">
+                Comercio Inquilino / Sucursal
+              </label>
+              <select
+                id="login-tenant-select"
+                value={tenant.id}
+                onChange={(e) => {
+                  onSelectTenant(e.target.value);
+                  setLoginError('');
+                }}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none cursor-pointer font-bold"
+              >
+                {tenants.map(t => (
+                  <option key={t.id} value={t.id}>
+                    🏢 {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* License input field */}
             <div className="space-y-1">
               <label htmlFor="login-license" className="text-[11px] font-semibold text-slate-400 block">
@@ -693,7 +645,7 @@ export default function AdminPanel({
                 id="login-license"
                 type="text"
                 required
-                placeholder="Ej. QUIM-XXXX-...."
+                placeholder="Ej. LIC-ECO-123 o 123456"
                 value={licenseInput}
                 onChange={(e) => {
                   setLicenseInput(e.target.value);
@@ -746,27 +698,28 @@ export default function AdminPanel({
             {/* Submit */}
             <button
               type="submit"
-              disabled={loginLoading}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer mt-2 flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer mt-2"
             >
-              {loginLoading
-                ? (<><span className="w-3.5 h-3.5 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span> Verificando…</>)
-                : '✓ Autenticar y Entrar'}
+              ✓ Autenticar y Entrar
             </button>
           </form>
 
           {/* Guide Helper Desk */}
           <div className="mt-6 p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[10px] text-slate-400 space-y-1.5 leading-normal">
-            <div className="font-bold text-indigo-400">🔐 Acceso seguro</div>
-            <div className="leading-relaxed">
-              Ingresá el <strong className="text-slate-300">código de licencia</strong> de tu comercio (empieza con
-              <code className="text-white bg-slate-800 px-1 py-0.5 rounded mx-1">QUIM-</code>) y creá o usá tu
-              usuario y contraseña de <strong className="text-slate-300">Dueño</strong>. Los dos dueños entran con la
-              misma licencia y distinto usuario. La contraseña debe tener 6 caracteres o más.
+            <div className="font-bold text-indigo-400">💡 Credenciales sugeridas para pruebas:</div>
+            <div>
+              <span className="font-semibold text-slate-300 block">🔑 Licencias según comercio seleccionado:</span>
+              - Eco-Química Argentina: <code className="text-white bg-slate-800 px-1 py-0.5 rounded">LIC-ECO-123</code><br/>
+              - Aroma & Brillo: <code className="text-white bg-slate-800 px-1 py-0.5 rounded">LIC-AROMA-456</code><br/>
+              - Química Industrial Norte: <code className="text-white bg-slate-800 px-1 py-0.5 rounded">LIC-NORTE-789</code><br/>
+              - (O usar clave universal <code className="text-white bg-slate-800 px-1 py-0.5 rounded">123456</code> para cualquiera)
             </div>
             <div className="border-t border-slate-800 pt-1.5">
-              👥 El <strong className="text-slate-300">Colaborador</strong> ingresa con la misma licencia y las
-              credenciales que le cargó el dueño desde el panel.
+              <span className="font-semibold text-slate-300">👤 Perfiles de Acceso:</span>
+              <ul className="list-disc pl-3 mt-1 space-y-0.5">
+                <li><strong>Administrador:</strong> user <code className="text-slate-200">admin</code> / pass <code className="text-slate-200">admin</code></li>
+                <li><strong>Colaborador:</strong> user <code className="text-slate-200">gaston</code> o <code className="text-slate-200">clara</code> / pass <code className="text-slate-200">123</code></li>
+              </ul>
             </div>
           </div>
         </div>
@@ -778,7 +731,7 @@ export default function AdminPanel({
     <div className={`${adminThemeClass} transition-colors duration-300 font-sans`}>
       
       {/* 1. ADMIN HEADER BAR */}
-      <header className="bg-slate-900 text-slate-100 py-3.5 px-6 border-b border-slate-800 flex flex-wrap gap-4 items-center justify-between sticky top-0 z-30 shadow-sm">
+      <header className="bg-slate-900 text-slate-100 py-3.5 px-6 border-b border-slate-800 flex flex-wrap gap-4 items-center justify-between sticky top-[53px] z-30 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-1.5 bg-indigo-500/10 text-indigo-400 rounded-md border border-indigo-500/20">
             <Settings className="w-5 h-5 animate-spin-slow" />
@@ -799,6 +752,25 @@ export default function AdminPanel({
             </p>
           </div>
         </div>
+
+        {/* Dynamic Tenant Selector for logged in Admin */}
+        {loggedInUser?.role === 'admin' && (
+          <div className="flex items-center gap-1 bg-slate-950/60 px-3 py-1 rounded-xl border border-slate-800">
+            <span className="text-[10px] font-bold text-slate-400">Comercio:</span>
+            <select
+              id="admin-header-tenant-select"
+              value={tenant.id}
+              onChange={(e) => onSelectTenant(e.target.value)}
+              className="bg-transparent text-xs font-black text-slate-200 focus:outline-none cursor-pointer py-0.5 px-1 rounded hover:bg-slate-900"
+            >
+              {tenants.map(t => (
+                <option key={t.id} value={t.id} className="bg-slate-950 text-slate-200">
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Action bell, logged user & logout */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -823,7 +795,9 @@ export default function AdminPanel({
 
             {/* Notification drop drawer */}
             {isNotifOpen && (
-              <div
+              <div 
+                onMouseEnter={clearNotifTimer}
+                onMouseLeave={startNotifTimer}
                 className="absolute right-0 mt-3.5 w-80 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-40 text-slate-200 overflow-hidden"
               >
                 <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
@@ -1031,13 +1005,11 @@ export default function AdminPanel({
                   </div>
 
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Pedidos</span>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Pedidos Concluidos</span>
                     <h3 className="text-xl font-black mt-1 text-slate-100">
-                      {tenantOrders.length}
+                      {completedOrders.length}
                     </h3>
-                    <p className="text-[10px] text-amber-400 mt-1">
-                      {pendingOrders.length} pendiente{pendingOrders.length === 1 ? '' : 's'} · {completedOrders.length} concluido{completedOrders.length === 1 ? '' : 's'}
-                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">De un total de {tenantOrders.length}</p>
                   </div>
 
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
@@ -1181,7 +1153,7 @@ export default function AdminPanel({
                     {/* QR Image Wrapper */}
                     <div className="p-2.5 bg-white rounded-xl shadow-inner flex items-center justify-center shrink-0">
                       <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`)}`}
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`)}`}
                         alt="QR Code" 
                         className="w-28 h-28"
                         referrerPolicy="no-referrer"
@@ -1198,7 +1170,7 @@ export default function AdminPanel({
                       <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
                         {/* WhatsApp share */}
                         <a
-                          href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`👋 ¡Hola! Te invito a visitar la tienda online de *${tenant.name}*. Podés ver nuestros productos, ofertas especiales y hacer tu pedido de forma rápida y sencilla desde aquí:\n\n🔗 ${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`)}`}
+                          href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`👋 ¡Hola! Te invito a visitar la tienda online de *${tenant.name}*. Podés ver nuestros productos, ofertas especiales y hacer tu pedido de forma rápida y sencilla desde aquí:\n\n🔗 ${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`)}`}
                           target="_blank"
                           rel="noreferrer"
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow transition-colors"
@@ -1210,7 +1182,7 @@ export default function AdminPanel({
                         {/* Copy URL trigger */}
                         <button
                           onClick={() => {
-                            const url = `${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`;
+                            const url = `${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`;
                             navigator.clipboard.writeText(url);
                             showAdminToast('¡Enlace copiado al portapapeles!', 'success');
                           }}
@@ -1221,7 +1193,7 @@ export default function AdminPanel({
 
                         {/* Download QR image trigger */}
                         <a
-                          href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`)}`}
+                          href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`)}`}
                           target="_blank"
                           rel="noreferrer"
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 rounded-lg text-[11px] font-bold transition-colors"
@@ -2108,7 +2080,7 @@ export default function AdminPanel({
                       {/* QR Image Wrapper */}
                       <div className="p-2.5 bg-white rounded-xl shadow-inner flex items-center justify-center shrink-0">
                         <img 
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`)}`}
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`)}`}
                           alt="QR Code" 
                           className="w-28 h-28"
                           referrerPolicy="no-referrer"
@@ -2125,7 +2097,7 @@ export default function AdminPanel({
                         <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
                           {/* WhatsApp share */}
                           <a
-                            href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`👋 ¡Hola! Te invito a visitar la tienda online de *${tenant.name}*. Podés ver nuestros productos, ofertas especiales y hacer tu pedido de forma rápida y sencilla desde aquí:\n\n🔗 ${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`)}`}
+                            href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`👋 ¡Hola! Te invito a visitar la tienda online de *${tenant.name}*. Podés ver nuestros productos, ofertas especiales y hacer tu pedido de forma rápida y sencilla desde aquí:\n\n🔗 ${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`)}`}
                             target="_blank"
                             rel="noreferrer"
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow transition-colors"
@@ -2137,7 +2109,7 @@ export default function AdminPanel({
                           {/* Copy URL trigger */}
                           <button
                             onClick={() => {
-                              const url = `${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`;
+                              const url = `${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`;
                               navigator.clipboard.writeText(url);
                               showAdminToast('¡Enlace copiado al portapapeles!', 'success');
                             }}
@@ -2148,7 +2120,7 @@ export default function AdminPanel({
 
                           {/* Download QR image trigger */}
                           <a
-                            href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?codigo=${tenant.id}`)}`}
+                            href={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`${window.location.origin}${window.location.pathname}?tenant=${tenant.id}`)}`}
                             target="_blank"
                             rel="noreferrer"
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/20 rounded-lg text-[11px] font-bold transition-colors"
@@ -2281,66 +2253,32 @@ export default function AdminPanel({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label htmlFor="modal-prod-category" className="text-xs font-semibold text-slate-400 block">Categoría *</label>
-                  <div className="flex items-center gap-2">
-                    <select
-                      id="modal-prod-category"
-                      value={prodCategory}
-                      onChange={(e) => setProdCategory(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
-                    >
-                      {categoryOptions.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleAddCategory}
-                      title="Agregar nueva categoría"
-                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer transition-colors shadow-sm"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRemoveCategory}
-                      title="Quitar la categoría seleccionada (si no tiene productos)"
-                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white border border-slate-700 rounded-lg cursor-pointer transition-colors shadow-sm"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <select
+                    id="modal-prod-category"
+                    value={prodCategory}
+                    onChange={(e) => setProdCategory(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
+                  >
+                    <option value="Jabones Líquidos">Jabones Líquidos</option>
+                    <option value="Desodorantes y Aromatizantes">Desodorantes y Aromatizantes</option>
+                    <option value="Limpiadores Generales">Limpiadores Generales</option>
+                    <option value="Lavandería">Lavandería</option>
+                  </select>
                 </div>
 
                 <div className="space-y-1">
                   <label htmlFor="modal-prod-unit" className="text-xs font-semibold text-slate-400 block">Unidad de Medida *</label>
-                  <div className="flex items-center gap-2">
-                    <select
-                      id="modal-prod-unit"
-                      value={prodUnit}
-                      onChange={(e) => setProdUnit(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
-                    >
-                      {unitOptions.map(u => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleAddUnit}
-                      title="Agregar nueva unidad de medida"
-                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer transition-colors shadow-sm"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRemoveUnit}
-                      title="Quitar la unidad seleccionada (si no tiene productos)"
-                      className="shrink-0 w-9 h-9 flex items-center justify-center bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white border border-slate-700 rounded-lg cursor-pointer transition-colors shadow-sm"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <select
+                    id="modal-prod-unit"
+                    value={prodUnit}
+                    onChange={(e) => setProdUnit(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none"
+                  >
+                    <option value="Litro">Litro</option>
+                    <option value="5 Litros">Bidón 5 Litros</option>
+                    <option value="500ml">Botella 500ml</option>
+                    <option value="Unidad">Unidad (Difusor/Fragancia)</option>
+                  </select>
                 </div>
               </div>
 
@@ -2354,9 +2292,8 @@ export default function AdminPanel({
                     required
                     min="1"
                     placeholder="Ej. 1800"
-                    value={prodPrice === 0 ? '' : prodPrice}
-                    onChange={(e) => setProdPrice(e.target.value === '' ? 0 : Number(e.target.value))}
-                    onFocus={(e) => e.target.select()}
+                    value={prodPrice}
+                    onChange={(e) => setProdPrice(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none font-mono"
                   />
                 </div>
@@ -2369,9 +2306,8 @@ export default function AdminPanel({
                     required
                     min="0"
                     placeholder="Ej. 50"
-                    value={prodStock === 0 ? '' : prodStock}
-                    onChange={(e) => setProdStock(e.target.value === '' ? 0 : Number(e.target.value))}
-                    onFocus={(e) => e.target.select()}
+                    value={prodStock}
+                    onChange={(e) => setProdStock(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none font-mono"
                   />
                 </div>
@@ -2402,9 +2338,8 @@ export default function AdminPanel({
                       required={prodIsPromo}
                       min="1"
                       placeholder="Ej. 1400"
-                      value={prodPromoPrice === 0 ? '' : prodPromoPrice}
-                      onChange={(e) => setProdPromoPrice(e.target.value === '' ? 0 : Number(e.target.value))}
-                      onFocus={(e) => e.target.select()}
+                      value={prodPromoPrice}
+                      onChange={(e) => setProdPromoPrice(Number(e.target.value))}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none font-mono"
                     />
                   </div>

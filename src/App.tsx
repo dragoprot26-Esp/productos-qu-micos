@@ -1,237 +1,349 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Tenant, Product, Order, Client, AppNotification, Collaborator } from './types';
-import { INITIAL_TENANTS, INITIAL_PRODUCTS } from './data';
+import { 
+  INITIAL_TENANTS, 
+  INITIAL_PRODUCTS, 
+  INITIAL_ORDERS, 
+  INITIAL_CLIENTS, 
+  INITIAL_NOTIFICATIONS,
+  INITIAL_COLLABORATORS
+} from './data';
+import TenantSelector from './components/TenantSelector';
 import PublicPage from './components/PublicPage';
 import AdminPanel from './components/AdminPanel';
-import { Bell, Sparkles, X } from 'lucide-react';
-import {
-  estaLogueado, miMembresia, cloudLoad, cloudSave,
-  quimPublica, quimAgregarPedido, signOutGlobal,
-} from './db/cloud';
-
-// ── Plantillas (una tienda por licencia) ────────────────────────────────
-const placeholderTenant: Tenant = {
-  id: '',
-  name: 'Mi Comercio',
-  subdomain: 'tienda',
-  customization: {
-    theme: 'eco-green',
-    fontFamily: 'font-sans',
-    welcomeSlogan: '',
-    aboutText: '',
-    primaryColor: '#10b981',
-    secondaryColor: '#059669',
-    logoUrl: '',
-    mapUrl: '',
-  },
-  allowDelivery: true,
-  adminTheme: 'slate-dark',
-};
-
-// Tienda semilla la primera vez que un dueño entra (a partir del molde eco).
-function makeSeedTenant(codigo: string): Tenant {
-  const base = INITIAL_TENANTS[0];
-  return { ...base, id: codigo, subdomain: (codigo || 'tienda').toLowerCase() };
-}
-function makeSeedProducts(codigo: string): Product[] {
-  return INITIAL_PRODUCTS
-    .filter(p => p.tenantId === 'eco-quimica')
-    .map(p => ({ ...p, tenantId: codigo }));
-}
-
-type SessionUser = { role: 'admin' | 'colaborador'; username: string; name: string; codigo: string };
+import { Bell, Sparkles, X, Check } from 'lucide-react';
 
 export default function App() {
-  // --- CORE STATE (una tienda) ---
-  const [tenant, setTenant] = useState<Tenant>(placeholderTenant);
+  // --- CORE STATE ---
+  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
-
-  // --- NAVIGATION / IDENTITY ---
-  const [licenseCode, setLicenseCode] = useState<string>('');
+  
+  // --- NAVIGATION STATE ---
+  const [currentTenantId, setCurrentTenantId] = useState<string>('eco-quimica');
   const [currentView, setCurrentView] = useState<'public' | 'admin' | 'preview'>('public');
-  const [ready, setReady] = useState(false);
 
-  // --- AUTH ---
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [loggedInUser, setLoggedInUser] = useState<SessionUser | null>(null);
-
-  // --- FLOATING TOAST ---
-  const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
-
-  const debounceRef = useRef<any>(null);
-
-  // ── Carga inicial ─────────────────────────────────────────────────────
-  async function loadAdminData(codigo: string) {
-    const blob = await cloudLoad(codigo);
-    if (blob && blob.tenant && Object.keys(blob.tenant).length) {
-      setTenant({ ...placeholderTenant, ...blob.tenant, id: codigo });
-      setProducts(blob.products || []);
-      setOrders(blob.orders || []);
-      setClients(blob.clients || []);
-      setNotifications(blob.notifications || []);
-      setCollaborators(blob.collaborators || []);
-    } else {
-      // Primera vez: sembramos una tienda de arranque
-      setTenant(makeSeedTenant(codigo));
-      setProducts(makeSeedProducts(codigo));
-      setOrders([]);
-      setClients([]);
-      setNotifications([]);
-      setCollaborators([]);
+  // --- AUTHENTICATION STATE ---
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    return localStorage.getItem('chem_is_logged_in') === 'true';
+  });
+  const [loggedInUser, setLoggedInUser] = useState<{ role: 'admin' | 'colaborador'; username: string; name: string } | null>(() => {
+    const saved = localStorage.getItem('chem_logged_in_user');
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
     }
-  }
+  });
 
-  useEffect(() => {
-    (async () => {
-      if ('Notification' in window && Notification.permission === 'default') {
-        try { Notification.requestPermission(); } catch { /* noop */ }
-      }
-
-      const params = new URLSearchParams(window.location.search);
-      const codigo = (params.get('codigo') || params.get('tenant') || '').trim();
-
-      // 1) Vidriera pública del cliente (?codigo=QUIM-...)
-      if (codigo) {
-        setLicenseCode(codigo);
-        setCurrentView('public');
-        const pub = await quimPublica(codigo);
-        if (pub) {
-          if (pub.tenant && Object.keys(pub.tenant).length) {
-            setTenant({ ...placeholderTenant, ...pub.tenant, id: codigo });
-          } else {
-            setTenant(makeSeedTenant(codigo));
-          }
-          setProducts(pub.products || []);
-        }
-        setReady(true);
-        return;
-      }
-
-      // 2) Panel del dueño/colaborador si hay sesión activa
-      if (estaLogueado()) {
-        const mem = await miMembresia();
-        if (mem && mem.tenant_id) {
-          setIsLoggedIn(true);
-          setLoggedInUser({
-            role: mem.rol === 'colab' ? 'colaborador' : 'admin',
-            username: mem.usuario,
-            name: mem.usuario,
-            codigo: mem.tenant_id,
-          });
-          setLicenseCode(mem.tenant_id);
-          await loadAdminData(mem.tenant_id);
-          setCurrentView('admin');
-          setReady(true);
-          return;
-        }
-      }
-
-      // 3) Sin sesión ni código → pantalla de login del panel
-      setCurrentView('admin');
-      setReady(true);
-    })();
-  }, []);
-
-  // ── Guardado automático a la nube (fusiona, NO pisa pedidos ajenos) ────
-  // Antes de escribir, releemos la nube y unimos los pedidos/notifs que hayan
-  // entrado desde la tienda pública o desde el otro usuario (admin/colaborador),
-  // así nadie se pisa los encargos.
-  useEffect(() => {
-    if (!ready || !isLoggedIn || !licenseCode) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      const nube = await cloudLoad(licenseCode);
-      const unir = (locales: any[], remotos: any[]) => {
-        const ids = new Set((locales || []).map(o => o.id));
-        return [...(locales || []), ...((remotos || []).filter(o => !ids.has(o.id)))];
-      };
-      const ordersMerged = unir(orders, nube?.orders || []);
-      const notifsMerged = unir(notifications, nube?.notifications || []);
-      const clientsMerged = unir(clients, nube?.clients || []);
-      await cloudSave(licenseCode, {
-        tenant, products,
-        orders: ordersMerged,
-        clients: clientsMerged,
-        notifications: notifsMerged,
-        collaborators,
-      });
-    }, 800);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [tenant, products, orders, clients, notifications, collaborators, isLoggedIn, licenseCode, ready]);
-
-  // ── Campanita: sondeo de pedidos (cada 8s). La nube manda para los pedidos
-  // ya existentes (para que admin y colaborador vean los cambios de estado),
-  // pero no se descartan pedidos locales que todavía no llegaron a la nube.
-  useEffect(() => {
-    if (!isLoggedIn || !licenseCode) return;
-    const iv = setInterval(async () => {
-      const blob = await cloudLoad(licenseCode);
-      if (!blob) return;
-      if (blob.orders) {
-        const cloudOrders = blob.orders as Order[];
-        const cloudIds = new Set(cloudOrders.map(o => o.id));
-        setOrders(prev => {
-          const localOnly = prev.filter(o => !cloudIds.has(o.id));
-          const merged = [...cloudOrders, ...localOnly];
-          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-          const nuevos = cloudOrders.filter(no => !prev.some(po => po.id === no.id));
-          if (prev.length && nuevos.length) {
-            nuevos.forEach(no => {
-              triggerPushToast({
-                id: Math.random().toString(36).substring(7),
-                tenantId: licenseCode,
-                title: '🚨 Nuevo Pedido Encargado',
-                message: `El cliente "${no.customerName}" encargó el pedido ${no.code} por un total de $${no.total}.`,
-                isRead: false,
-                createdAt: new Date().toISOString(),
-                orderId: no.id,
-                type: 'new_order',
-              });
-            });
-          }
-          return merged;
-        });
-      }
-      if (blob.notifications) setNotifications(blob.notifications as AppNotification[]);
-    }, 8000);
-    return () => clearInterval(iv);
-  }, [isLoggedIn, licenseCode]);
-
-  // ── Save helpers (solo estado; el efecto de arriba persiste a la nube) ─
-  const saveProducts = (updated: Product[]) => setProducts(updated);
-  const saveOrders = (updated: Order[]) => setOrders(updated);
-  const saveClients = (updated: Client[]) => setClients(updated);
-  const saveNotifications = (updated: AppNotification[]) => setNotifications(updated);
-  const saveCollaborators = (updated: Collaborator[]) => setCollaborators(updated);
-
-  // ── Auth handlers ─────────────────────────────────────────────────────
-  const handleLogin = async (user: SessionUser) => {
+  const handleLogin = (user: { role: 'admin' | 'colaborador'; username: string; name: string }) => {
     setIsLoggedIn(true);
     setLoggedInUser(user);
-    setLicenseCode(user.codigo);
-    await loadAdminData(user.codigo);
-    setCurrentView('admin');
+    localStorage.setItem('chem_is_logged_in', 'true');
+    localStorage.setItem('chem_logged_in_user', JSON.stringify(user));
   };
 
-  const handleLogout = async () => {
-    try { await signOutGlobal(); } catch { /* noop */ }
+  const handleLogout = () => {
     setIsLoggedIn(false);
     setLoggedInUser(null);
-    setLicenseCode('');
-    setTenant(placeholderTenant);
-    setProducts([]); setOrders([]); setClients([]); setNotifications([]); setCollaborators([]);
+    localStorage.removeItem('chem_is_logged_in');
+    localStorage.removeItem('chem_logged_in_user');
   };
 
-  // ── Tenant / branding ─────────────────────────────────────────────────
-  const handleUpdateTenant = (updated: Tenant) => setTenant({ ...updated, id: licenseCode || updated.id });
+  // --- FLOATING REAL-TIME TOAST STATE ---
+  const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
 
-  // ── Crear pedido (público por RPC / admin local) ──────────────────────
+  // --- LOAD AND PERSISTENCE IN LOCALSTORAGE ---
+  const postToServer = async (key: string, data: any) => {
+    try {
+      await fetch('/api/store-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, data })
+      });
+    } catch (err) {
+      console.warn('Backend server not reachable for saving:', err);
+    }
+  };
+
+  useEffect(() => {
+    const fetchAndLoadData = async () => {
+      let serverData: Record<string, any> = {};
+      try {
+        const response = await fetch('/api/store-data');
+        if (response.ok) {
+          serverData = await response.json();
+        }
+      } catch (err) {
+        console.warn('Backend server not yet ready, using client storage:', err);
+      }
+
+      // --- TENANTS ---
+      const hasServerTenants = serverData && serverData.chem_tenants && serverData.chem_tenants.length > 0;
+      if (hasServerTenants) {
+        setTenants(serverData.chem_tenants);
+        localStorage.setItem('chem_tenants', JSON.stringify(serverData.chem_tenants));
+      } else {
+        const storedTenants = localStorage.getItem('chem_tenants');
+        if (storedTenants) {
+          const parsed = JSON.parse(storedTenants);
+          setTenants(parsed);
+          postToServer('chem_tenants', parsed);
+        } else {
+          setTenants(INITIAL_TENANTS);
+          localStorage.setItem('chem_tenants', JSON.stringify(INITIAL_TENANTS));
+          postToServer('chem_tenants', INITIAL_TENANTS);
+        }
+      }
+
+      // --- PRODUCTS ---
+      const hasServerProducts = serverData && serverData.chem_products && serverData.chem_products.length > 0;
+      if (hasServerProducts) {
+        setProducts(serverData.chem_products);
+        localStorage.setItem('chem_products', JSON.stringify(serverData.chem_products));
+      } else {
+        const storedProducts = localStorage.getItem('chem_products');
+        if (storedProducts) {
+          const parsed = JSON.parse(storedProducts);
+          setProducts(parsed);
+          postToServer('chem_products', parsed);
+        } else {
+          setProducts(INITIAL_PRODUCTS);
+          localStorage.setItem('chem_products', JSON.stringify(INITIAL_PRODUCTS));
+          postToServer('chem_products', INITIAL_PRODUCTS);
+        }
+      }
+
+      // --- ORDERS ---
+      const hasServerOrders = serverData && serverData.chem_orders;
+      if (hasServerOrders) {
+        setOrders(serverData.chem_orders);
+        localStorage.setItem('chem_orders', JSON.stringify(serverData.chem_orders));
+      } else {
+        const storedOrders = localStorage.getItem('chem_orders');
+        if (storedOrders) {
+          const parsed = JSON.parse(storedOrders);
+          setOrders(parsed);
+          postToServer('chem_orders', parsed);
+        } else {
+          setOrders(INITIAL_ORDERS);
+          localStorage.setItem('chem_orders', JSON.stringify(INITIAL_ORDERS));
+          postToServer('chem_orders', INITIAL_ORDERS);
+        }
+      }
+
+      // --- CLIENTS ---
+      const hasServerClients = serverData && serverData.chem_clients;
+      if (hasServerClients) {
+        setClients(serverData.chem_clients);
+        localStorage.setItem('chem_clients', JSON.stringify(serverData.chem_clients));
+      } else {
+        const storedClients = localStorage.getItem('chem_clients');
+        if (storedClients) {
+          const parsed = JSON.parse(storedClients);
+          setClients(parsed);
+          postToServer('chem_clients', parsed);
+        } else {
+          setClients(INITIAL_CLIENTS);
+          localStorage.setItem('chem_clients', JSON.stringify(INITIAL_CLIENTS));
+          postToServer('chem_clients', INITIAL_CLIENTS);
+        }
+      }
+
+      // --- NOTIFICATIONS ---
+      const hasServerNotifications = serverData && serverData.chem_notifications;
+      if (hasServerNotifications) {
+        setNotifications(serverData.chem_notifications);
+        localStorage.setItem('chem_notifications', JSON.stringify(serverData.chem_notifications));
+      } else {
+        const storedNotifications = localStorage.getItem('chem_notifications');
+        if (storedNotifications) {
+          const parsed = JSON.parse(storedNotifications);
+          setNotifications(parsed);
+          postToServer('chem_notifications', parsed);
+        } else {
+          setNotifications(INITIAL_NOTIFICATIONS);
+          localStorage.setItem('chem_notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
+          postToServer('chem_notifications', INITIAL_NOTIFICATIONS);
+        }
+      }
+
+      // --- COLLABORATORS ---
+      const hasServerCollaborators = serverData && serverData.chem_collaborators && serverData.chem_collaborators.length > 0;
+      if (hasServerCollaborators) {
+        setCollaborators(serverData.chem_collaborators);
+        localStorage.setItem('chem_collaborators', JSON.stringify(serverData.chem_collaborators));
+      } else {
+        const storedCollaborators = localStorage.getItem('chem_collaborators');
+        if (storedCollaborators) {
+          const parsed = JSON.parse(storedCollaborators);
+          setCollaborators(parsed);
+          postToServer('chem_collaborators', parsed);
+        } else {
+          setCollaborators(INITIAL_COLLABORATORS);
+          localStorage.setItem('chem_collaborators', JSON.stringify(INITIAL_COLLABORATORS));
+          postToServer('chem_collaborators', INITIAL_COLLABORATORS);
+        }
+      }
+    };
+
+    fetchAndLoadData();
+
+    // Attempt to request push notifications permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    // Read ?tenant=abc from URL query string if present (for QR codes scan)
+    const params = new URLSearchParams(window.location.search);
+    const tenantParam = params.get('tenant');
+    if (tenantParam) {
+      setCurrentTenantId(tenantParam);
+      setCurrentView('public'); // Default to store view for customers scanning QR
+    }
+  }, []);
+
+  // Periodically poll backend for any remote updates (e.g., order placed on phone)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch('/api/store-data');
+        if (response.ok) {
+          const serverData = await response.json();
+          
+          if (serverData.chem_orders) {
+            const ordersStr = JSON.stringify(serverData.chem_orders);
+            const localOrdersStr = localStorage.getItem('chem_orders');
+            if (ordersStr !== localOrdersStr) {
+              setOrders(serverData.chem_orders);
+              localStorage.setItem('chem_orders', ordersStr);
+              
+              if (localOrdersStr) {
+                const prevOrders = JSON.parse(localOrdersStr) as Order[];
+                if (serverData.chem_orders.length > prevOrders.length) {
+                  const newOrders = (serverData.chem_orders as Order[]).filter(
+                    no => !prevOrders.some(po => po.id === no.id)
+                  );
+                  newOrders.forEach(no => {
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                      new Notification('🚨 Nuevo Pedido Encargado', {
+                        body: `El cliente "${no.customerName}" ha encargado un pedido (${no.code}) por un total de $${no.total}.`
+                      });
+                    }
+                  });
+                }
+              }
+            }
+          }
+
+          if (serverData.chem_notifications) {
+            const notifsStr = JSON.stringify(serverData.chem_notifications);
+            const localNotifsStr = localStorage.getItem('chem_notifications');
+            if (notifsStr !== localNotifsStr) {
+              setNotifications(serverData.chem_notifications);
+              localStorage.setItem('chem_notifications', notifsStr);
+            }
+          }
+
+          if (serverData.chem_products) {
+            const productsStr = JSON.stringify(serverData.chem_products);
+            const localProductsStr = localStorage.getItem('chem_products');
+            if (productsStr !== localProductsStr) {
+              setProducts(serverData.chem_products);
+              localStorage.setItem('chem_products', productsStr);
+            }
+          }
+
+          if (serverData.chem_tenants) {
+            const tenantsStr = JSON.stringify(serverData.chem_tenants);
+            const localTenantsStr = localStorage.getItem('chem_tenants');
+            if (tenantsStr !== localTenantsStr) {
+              setTenants(serverData.chem_tenants);
+              localStorage.setItem('chem_tenants', tenantsStr);
+            }
+          }
+
+          if (serverData.chem_clients) {
+            const clientsStr = JSON.stringify(serverData.chem_clients);
+            const localClientsStr = localStorage.getItem('chem_clients');
+            if (clientsStr !== localClientsStr) {
+              setClients(serverData.chem_clients);
+              localStorage.setItem('chem_clients', clientsStr);
+            }
+          }
+
+          if (serverData.chem_collaborators) {
+            const colabsStr = JSON.stringify(serverData.chem_collaborators);
+            const localColabsStr = localStorage.getItem('chem_collaborators');
+            if (colabsStr !== localColabsStr) {
+              setCollaborators(serverData.chem_collaborators);
+              localStorage.setItem('chem_collaborators', colabsStr);
+            }
+          }
+        }
+      } catch (err) {
+        // Silent
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Save helpers
+  const saveTenants = (updated: Tenant[]) => {
+    setTenants(updated);
+    localStorage.setItem('chem_tenants', JSON.stringify(updated));
+    postToServer('chem_tenants', updated);
+  };
+
+  const saveProducts = (updated: Product[]) => {
+    setProducts(updated);
+    localStorage.setItem('chem_products', JSON.stringify(updated));
+    postToServer('chem_products', updated);
+  };
+
+  const saveOrders = (updated: Order[]) => {
+    setOrders(updated);
+    localStorage.setItem('chem_orders', JSON.stringify(updated));
+    postToServer('chem_orders', updated);
+  };
+
+  const saveClients = (updated: Client[]) => {
+    setClients(updated);
+    localStorage.setItem('chem_clients', JSON.stringify(updated));
+    postToServer('chem_clients', updated);
+  };
+
+  const saveNotifications = (updated: AppNotification[]) => {
+    setNotifications(updated);
+    localStorage.setItem('chem_notifications', JSON.stringify(updated));
+    postToServer('chem_notifications', updated);
+  };
+
+  const saveCollaborators = (updated: Collaborator[]) => {
+    setCollaborators(updated);
+    localStorage.setItem('chem_collaborators', JSON.stringify(updated));
+    postToServer('chem_collaborators', updated);
+  };
+
+  // Find currently active tenant details
+  const currentTenant = tenants.find(t => t.id === currentTenantId) || tenants[0];
+
+  // --- BUSINESS CALLBACK HANDLERS ---
+
+  // Handle tenant brand customizations
+  const handleUpdateTenant = (updated: Tenant) => {
+    const nextTenants = tenants.map(t => t.id === updated.id ? updated : t);
+    saveTenants(nextTenants);
+  };
+
+  // Create order from public storefront
   const handlePlaceOrder = (orderData: Omit<Order, 'id' | 'code' | 'createdAt'>): string => {
-    const prefix = (tenant.subdomain || 'quim').substring(0, 4).toUpperCase();
+    // 1. Generate unique pick-up code (human-friendly, e.g. ECO-5142)
+    const prefix = currentTenant.subdomain.substring(0, 3).toUpperCase();
     const uniqueDigits = Math.floor(1000 + Math.random() * 9000);
     const orderCode = `${prefix}-${uniqueDigits}`;
 
@@ -239,85 +351,105 @@ export default function App() {
       id: Math.random().toString(36).substring(7),
       code: orderCode,
       createdAt: new Date().toISOString(),
-      ...orderData,
-      tenantId: licenseCode || orderData.tenantId,
+      ...orderData
     };
 
-    // Cliente público (no logueado): mandamos el pedido por RPC seguro.
-    if (!isLoggedIn) {
-      quimAgregarPedido(licenseCode, newOrder);
-      setOrders(prev => [newOrder, ...prev]); // feedback optimista
-      return orderCode;
-    }
-
-    // Dueño/colaborador (preview o carga manual): actualización local completa.
+    // 2. Reduce products inventory stock levels
     const nextProducts = products.map(prod => {
       const matchItem = orderData.items.find(it => it.productId === prod.id);
-      return matchItem ? { ...prod, stock: Math.max(0, prod.stock - matchItem.quantity) } : prod;
+      if (matchItem) {
+        return {
+          ...prod,
+          stock: Math.max(0, prod.stock - matchItem.quantity)
+        };
+      }
+      return prod;
     });
     saveProducts(nextProducts);
 
-    const existingClient = clients.find(c => c.phone === orderData.customerPhone);
+    // 3. Register or update client metrics (CRM)
+    const existingClient = clients.find(c => c.tenantId === orderData.tenantId && c.phone === orderData.customerPhone);
     if (existingClient) {
-      saveClients(clients.map(c => c.id === existingClient.id ? {
+      const nextClients = clients.map(c => c.id === existingClient.id ? {
         ...c,
         totalSpent: c.totalSpent + orderData.total,
         ordersCount: c.ordersCount + 1,
-        lastOrderDate: new Date().toISOString().substring(0, 10),
-      } : c));
+        lastOrderDate: new Date().toISOString().substring(0, 10)
+      } : c);
+      saveClients(nextClients);
     } else {
-      saveClients([...clients, {
+      const newClient: Client = {
         id: Math.random().toString(36).substring(7),
-        tenantId: licenseCode,
+        tenantId: orderData.tenantId,
         name: orderData.customerName,
         phone: orderData.customerPhone,
         lastOrderDate: new Date().toISOString().substring(0, 10),
         totalSpent: orderData.total,
-        ordersCount: 1,
-      }]);
+        ordersCount: 1
+      };
+      saveClients([...clients, newClient]);
     }
 
+    // 4. Append to orders
     saveOrders([newOrder, ...orders]);
 
+    // 5. Generate Real-time Push Alert notification
+    const alertMsg = `El cliente "${orderData.customerName}" ha encargado un pedido (${orderCode}) por un total de $${orderData.total}.`;
     const newNotif: AppNotification = {
       id: Math.random().toString(36).substring(7),
-      tenantId: licenseCode,
+      tenantId: orderData.tenantId,
       title: '🚨 Nuevo Pedido Encargado',
-      message: `El cliente "${orderData.customerName}" encargó el pedido ${orderCode} por un total de $${orderData.total}.`,
+      message: alertMsg,
       isRead: false,
       createdAt: new Date().toISOString(),
       orderId: newOrder.id,
-      type: 'new_order',
+      type: 'new_order'
     };
     saveNotifications([newNotif, ...notifications]);
+
+    // Trigger local push visual slide-in
     triggerPushToast(newNotif);
 
     return orderCode;
   };
 
-  // ── CRUD productos ────────────────────────────────────────────────────
+  // CRUD Product Actions
   const handleAddProduct = (prodData: Omit<Product, 'id'>) => {
-    saveProducts([...products, { id: Math.random().toString(36).substring(7), ...prodData, tenantId: licenseCode }]);
+    const newProduct: Product = {
+      id: Math.random().toString(36).substring(7),
+      ...prodData
+    };
+    saveProducts([...products, newProduct]);
   };
-  const handleEditProduct = (updated: Product) => saveProducts(products.map(p => p.id === updated.id ? updated : p));
-  const handleDeleteProduct = (productId: string) => saveProducts(products.filter(p => p.id !== productId));
 
-  // ── Estado de pedidos ─────────────────────────────────────────────────
+  const handleEditProduct = (updated: Product) => {
+    const nextProducts = products.map(p => p.id === updated.id ? updated : p);
+    saveProducts(nextProducts);
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    const nextProducts = products.filter(p => p.id !== productId);
+    saveProducts(nextProducts);
+  };
+
+  // Transition Order State
   const handleUpdateOrderStatus = (orderId: string, status: Order['status']) => {
-    saveOrders(orders.map(o => o.id === orderId ? { ...o, status } : o));
+    const nextOrders = orders.map(o => o.id === orderId ? { ...o, status } : o);
+    saveOrders(nextOrders);
 
     const orderObj = orders.find(o => o.id === orderId);
     if (!orderObj) return;
 
+    // Build friendly description according to state
     let statusLabel = '';
     let notificationTitle = '';
     if (status === 'preparing') {
       statusLabel = 'se está preparando en laboratorio.';
       notificationTitle = '⚙ Pedido en Preparación';
     } else if (status === 'ready_or_shipped') {
-      statusLabel = orderObj.deliveryType === 'delivery'
-        ? 'ha sido despachado en camino a su domicilio.'
-        : 'ya se encuentra listo para retirar en local.';
+      statusLabel = orderObj.deliveryType === 'delivery' 
+        ? 'ha sido despachado en camino a su domicilio.' 
+        : 'ya se encuentra listo para retirar en local sucursal.';
       notificationTitle = orderObj.deliveryType === 'delivery' ? '🚚 Pedido Despachado' : '🏪 Listo para Retirar';
     } else if (status === 'completed') {
       statusLabel = 'ha sido retirado/entregado con éxito. ¡Gracias por confiar en nosotros!';
@@ -328,150 +460,182 @@ export default function App() {
     }
 
     if (statusLabel) {
+      const alertMsg = `Tu pedido ${orderObj.code} ${statusLabel}`;
       const newNotif: AppNotification = {
         id: Math.random().toString(36).substring(7),
-        tenantId: licenseCode,
+        tenantId: orderObj.tenantId,
         title: notificationTitle,
-        message: `Tu pedido ${orderObj.code} ${statusLabel}`,
+        message: alertMsg,
         isRead: false,
         createdAt: new Date().toISOString(),
         orderId: orderObj.id,
-        type: 'status_change',
+        type: 'status_change'
       };
       saveNotifications([newNotif, ...notifications]);
       triggerPushToast(newNotif);
     }
   };
 
-  // ── Simular pedido entrante (demo del panel) ──────────────────────────
+  // Simulate External Client Order (Quick button demo)
   const handleSimulateIncomingOrder = () => {
-    const names = ['María Belén', 'Juan Cruz', 'Sofia Santillán', 'Gastón Alarcón', 'Clara De Benedictis'];
+    const names = ['María Belén', 'Juan Cruz', 'Sofia Santillán', 'Gastón Alarcón', 'Clara De Benedictis', 'Estanislao Soler'];
     const phones = ['+54 11 9855-4321', '+54 341 520-9900', '+54 261 445-5566', '+54 9 11 3344-7788'];
     const randomName = names[Math.floor(Math.random() * names.length)];
     const randomPhone = phones[Math.floor(Math.random() * phones.length)];
 
-    const disponibles = products.filter(p => p.stock > 0);
-    if (disponibles.length === 0) { alert('Debe tener productos cargados con stock para simular compras.'); return; }
+    // Grab 1 or 2 products for this tenant
+    const currentTenantProducts = products.filter(p => p.tenantId === currentTenantId && p.stock > 0);
+    if (currentTenantProducts.length === 0) {
+      alert('Debe tener productos cargados con stock para simular compras.');
+      return;
+    }
 
-    const itemProducts = disponibles.slice(0, Math.floor(1 + Math.random() * 2));
+    const itemProducts = currentTenantProducts.slice(0, Math.floor(1 + Math.random() * 2));
     const items = itemProducts.map(p => {
       const activePrice = p.isPromo && p.promoPrice ? p.promoPrice : p.price;
-      return { productId: p.id, name: p.name, quantity: Math.floor(1 + Math.random() * 3), price: activePrice };
+      return {
+        productId: p.id,
+        name: p.name,
+        quantity: Math.floor(1 + Math.random() * 3),
+        price: activePrice
+      };
     });
-    const total = items.reduce((acc, curr) => acc + (curr.price * curr.quantity), 0);
-    const deliveryType = tenant.allowDelivery ? (Math.random() > 0.5 ? 'delivery' : 'pickup') : 'pickup';
 
+    const total = items.reduce((acc, curr) => acc + (curr.price * curr.quantity), 0);
+    const deliveryType = currentTenant.allowDelivery ? (Math.random() > 0.5 ? 'delivery' : 'pickup') : 'pickup';
+
+    // Place simulated order
     handlePlaceOrder({
-      tenantId: licenseCode,
+      tenantId: currentTenantId,
       customerName: randomName,
       customerPhone: randomPhone,
       items,
       total,
       deliveryType,
-      status: 'pending',
+      status: 'pending'
     });
   };
 
-  // ── Toast + sonido ────────────────────────────────────────────────────
+  // Helper to flash notifications Toast
   const triggerPushToast = (notif: AppNotification) => {
     setActiveToast(notif);
+    
+    // Play subtle audio synthetic warning beep via standard Web Audio API
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
+      
       oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 chime
       oscillator.connect(gainNode);
       gainNode.connect(audioCtx.destination);
       gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + 0.15);
-    } catch (e) { /* noop */ }
-
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try { new Notification(notif.title, { body: notif.message, icon: tenant.customization.logoUrl }); } catch { /* noop */ }
+    } catch (e) {
+      // Audio context might be blocked or unsupported - fail silently
     }
 
-    setTimeout(() => setActiveToast(cur => (cur && cur.id === notif.id ? null : cur)), 6000);
+    // Native browser push alert where authorized
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(notif.title, {
+        body: notif.message,
+        icon: currentTenant.customization.logoUrl
+      });
+    }
   };
 
-  const handleMarkNotificationsRead = () => saveNotifications(notifications.map(n => ({ ...n, isRead: true })));
-  const handleClearNotificationsForTenant = () => saveNotifications([]);
+  const handleMarkNotificationsRead = () => {
+    const nextNotifs = notifications.map(n => n.tenantId === currentTenantId ? { ...n, isRead: true } : n);
+    saveNotifications(nextNotifs);
+  };
 
-  // ── Loader ────────────────────────────────────────────────────────────
-  if (!ready) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-300 font-sans">
-        <div className="flex items-center gap-3 text-sm">
-          <span className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></span>
-          Cargando tienda…
-        </div>
-      </div>
-    );
-  }
-
-  const publicOrPreview = currentView === 'public' || currentView === 'preview';
+  const handleClearNotificationsForTenant = () => {
+    const nextNotifs = notifications.filter(n => n.tenantId !== currentTenantId);
+    saveNotifications(nextNotifs);
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-900 select-none antialiased">
-      <div className="flex-1">
-        {currentView === 'preview' && (
-          <div className="bg-indigo-950 text-indigo-100 px-4 py-2 flex items-center justify-between border-b border-indigo-800 shadow-md sticky top-0 z-50 font-sans">
-            <div className="flex items-center gap-2">
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-bold uppercase tracking-wider">Modo Vista Previa de Tienda</span>
-              <span className="text-[10.5px] text-indigo-300 hidden sm:inline">({tenant.name})</span>
+      
+      {/* 1. TOP SELECTOR CONTROLLER BAR */}
+      {tenants.length > 0 && currentView === 'admin' && (
+        <TenantSelector
+          tenants={tenants}
+          currentTenant={currentTenant}
+          onSelectTenant={(id) => {
+            setCurrentTenantId(id);
+          }}
+          currentView={currentView}
+          onChangeView={(v) => setCurrentView(v)}
+          onSimulateOrder={handleSimulateIncomingOrder}
+        />
+      )}
+
+      {/* 2. CORE VIEW SWITCHER PORTALS */}
+      {tenants.length > 0 && (
+        <div className="flex-1">
+          {currentView === 'preview' && (
+            <div className="bg-indigo-950 text-indigo-100 px-4 py-2 flex items-center justify-between border-b border-indigo-800 shadow-md sticky top-0 z-50 font-sans">
+              <div className="flex items-center gap-2">
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider">Modo Vista Previa de Tienda</span>
+                <span className="text-[10.5px] text-indigo-300 hidden sm:inline">({currentTenant.name})</span>
+              </div>
+              <button
+                onClick={() => setCurrentView('admin')}
+                className="flex items-center gap-1 px-3 py-1 bg-white hover:bg-slate-100 text-indigo-950 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
+              >
+                <span>← Volver al Panel Admin</span>
+              </button>
             </div>
-            <button
-              onClick={() => setCurrentView('admin')}
-              className="flex items-center gap-1 px-3 py-1 bg-white hover:bg-slate-100 text-indigo-950 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
-            >
-              <span>← Volver al Panel Admin</span>
-            </button>
-          </div>
-        )}
+          )}
 
-        {publicOrPreview ? (
-          <PublicPage
-            tenant={tenant}
-            products={products}
-            onPlaceOrder={handlePlaceOrder}
-            notifications={notifications}
-            onMarkNotificationsRead={handleMarkNotificationsRead}
-            onGoToAdmin={() => setCurrentView('admin')}
-          />
-        ) : (
-          <AdminPanel
-            tenant={tenant}
-            tenants={[tenant]}
-            onSelectTenant={() => {}}
-            onUpdateTenant={handleUpdateTenant}
-            products={products}
-            onAddProduct={handleAddProduct}
-            onEditProduct={handleEditProduct}
-            onDeleteProduct={handleDeleteProduct}
-            orders={orders}
-            onUpdateOrderStatus={handleUpdateOrderStatus}
-            collaborators={collaborators}
-            onAddCollaborator={(colab) => saveCollaborators([...collaborators, colab])}
-            onDeleteCollaborator={(id) => saveCollaborators(collaborators.filter(c => c.id !== id))}
-            onUpdateCollaborator={(colab) => saveCollaborators(collaborators.map(c => c.id === colab.id ? colab : c))}
-            notifications={notifications}
-            onClearNotifications={handleClearNotificationsForTenant}
-            onTogglePreviewMode={() => setCurrentView('preview')}
-            isLoggedIn={isLoggedIn}
-            loggedInUser={loggedInUser}
-            onLogin={handleLogin}
-            onLogout={handleLogout}
-          />
-        )}
-      </div>
+          {currentView === 'public' || currentView === 'preview' ? (
+            <PublicPage
+              tenant={currentTenant}
+              products={products}
+              onPlaceOrder={handlePlaceOrder}
+              notifications={notifications}
+              onMarkNotificationsRead={handleMarkNotificationsRead}
+              onGoToAdmin={() => setCurrentView('admin')}
+            />
+          ) : (
+            <AdminPanel
+              tenant={currentTenant}
+              tenants={tenants}
+              onSelectTenant={setCurrentTenantId}
+              onUpdateTenant={handleUpdateTenant}
+              products={products}
+              onAddProduct={handleAddProduct}
+              onEditProduct={handleEditProduct}
+              onDeleteProduct={handleDeleteProduct}
+              orders={orders}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+              collaborators={collaborators}
+              onAddCollaborator={(colab) => saveCollaborators([...collaborators, colab])}
+              onDeleteCollaborator={(id) => saveCollaborators(collaborators.filter(c => c.id !== id))}
+              onUpdateCollaborator={(colab) => saveCollaborators(collaborators.map(c => c.id === colab.id ? colab : c))}
+              notifications={notifications}
+              onClearNotifications={handleClearNotificationsForTenant}
+              onTogglePreviewMode={() => setCurrentView('preview')}
+              isLoggedIn={isLoggedIn}
+              loggedInUser={loggedInUser}
+              onLogin={handleLogin}
+              onLogout={handleLogout}
+            />
+          )}
+        </div>
+      )}
 
+      {/* 3. SIMULATED FLOATING REAL-TIME PUSH NOTIFICATION TOAST */}
       {activeToast && (
-        <div
+        <div 
           id="realtime-push-toast-banner"
           className="fixed top-18 right-4 z-50 max-w-sm w-full bg-slate-900/95 border border-indigo-500/30 text-slate-100 p-4 rounded-2xl shadow-2xl flex items-start gap-3 animate-slide-up backdrop-blur-sm"
         >
@@ -484,12 +648,22 @@ export default function App() {
                 <Sparkles className="w-3 h-3 text-indigo-400" />
                 Alerta de Pedido
               </span>
-              <button onClick={() => setActiveToast(null)} className="text-slate-500 hover:text-slate-300 transition-colors">
+              <button 
+                onClick={() => setActiveToast(null)}
+                className="text-slate-500 hover:text-slate-300 transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <strong className="text-sm font-extrabold text-white block mt-0.5">{activeToast.title}</strong>
-            <p className="text-xs text-slate-400 mt-1">{activeToast.message}</p>
+            <strong className="text-sm font-extrabold text-white block mt-0.5">
+              {activeToast.title}
+            </strong>
+            <p className="text-xs text-slate-400 mt-1">
+              {activeToast.message}
+            </p>
+            <div className="flex items-center gap-1 text-[10px] text-slate-500 mt-2 font-mono">
+              <span>Código: {activeToast.orderId ? 'REGISTRADO' : 'NOTIFICACION'}</span>
+            </div>
           </div>
         </div>
       )}

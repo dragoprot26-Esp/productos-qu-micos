@@ -244,7 +244,7 @@ export default function AdminPanel({
   // Notifications bell toggle
   const [isNotifOpen, setIsNotifOpen] = useState(false);
 
-  // Auto-close notification panel after 7 seconds of inactivity
+  // Auto-cierre del panel de notificaciones a los 3 segundos de abrirlo
   const notifTimeoutRef = useRef<any>(null);
 
   const startNotifTimer = useCallback(() => {
@@ -253,7 +253,7 @@ export default function AdminPanel({
     }
     notifTimeoutRef.current = setTimeout(() => {
       setIsNotifOpen(false);
-    }, 7000);
+    }, 3000);
   }, []);
 
   const clearNotifTimer = useCallback(() => {
@@ -823,9 +823,7 @@ export default function AdminPanel({
 
             {/* Notification drop drawer */}
             {isNotifOpen && (
-              <div 
-                onMouseEnter={clearNotifTimer}
-                onMouseLeave={startNotifTimer}
+              <div
                 className="absolute right-0 mt-3.5 w-80 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl z-40 text-slate-200 overflow-hidden"
               >
                 <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">

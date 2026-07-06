@@ -978,18 +978,20 @@ export default function AdminPanel({
           {/* Menu Sidebar navigation */}
           <div className="lg:col-span-3">
             <div className="bg-slate-900/10 p-3 rounded-2xl border border-slate-200/20 backdrop-blur-sm space-y-1">
-              <button
-                id="btn-tab-dashboard"
-                onClick={() => setActiveTab('dashboard')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold text-left cursor-pointer transition-all ${
-                  activeTab === 'dashboard'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4" />
-                Control de Ventas (Dashboard)
-              </button>
+              {loggedInUser?.role === 'admin' && (
+                <button
+                  id="btn-tab-dashboard"
+                  onClick={() => setActiveTab('dashboard')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold text-left cursor-pointer transition-all ${
+                    activeTab === 'dashboard'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Control de Ventas (Dashboard)
+                </button>
+              )}
 
               <button
                 id="btn-tab-products"
@@ -1096,10 +1098,10 @@ export default function AdminPanel({
           {/* Core Content Zone */}
           <div className="lg:col-span-9 bg-slate-900/50 p-6 rounded-3xl border border-slate-200/10 backdrop-blur-md">
             
-            {/* --- TAB 1: DASHBOARD --- */}
-            {activeTab === 'dashboard' && (
+            {/* --- TAB 1: DASHBOARD (solo Dueño) --- */}
+            {activeTab === 'dashboard' && loggedInUser?.role === 'admin' && (
               <div className="space-y-6">
-                
+
                 {/* Stats KPIs cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">

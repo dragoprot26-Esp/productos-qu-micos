@@ -136,29 +136,52 @@ export default function App() {
     })();
   }, []);
 
-  // ── Guardado automático a la nube (solo dueño/colaborador logueado) ────
+  // ── Guardado automático a la nube (fusiona, NO pisa pedidos ajenos) ────
+  // Antes de escribir, releemos la nube y unimos los pedidos/notifs que hayan
+  // entrado desde la tienda pública o desde el otro usuario (admin/colaborador),
+  // así nadie se pisa los encargos.
   useEffect(() => {
     if (!ready || !isLoggedIn || !licenseCode) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      cloudSave(licenseCode, { tenant, products, orders, clients, notifications, collaborators });
+    debounceRef.current = setTimeout(async () => {
+      const nube = await cloudLoad(licenseCode);
+      const unir = (locales: any[], remotos: any[]) => {
+        const ids = new Set((locales || []).map(o => o.id));
+        return [...(locales || []), ...((remotos || []).filter(o => !ids.has(o.id)))];
+      };
+      const ordersMerged = unir(orders, nube?.orders || []);
+      const notifsMerged = unir(notifications, nube?.notifications || []);
+      const clientsMerged = unir(clients, nube?.clients || []);
+      await cloudSave(licenseCode, {
+        tenant, products,
+        orders: ordersMerged,
+        clients: clientsMerged,
+        notifications: notifsMerged,
+        collaborators,
+      });
     }, 800);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [tenant, products, orders, clients, notifications, collaborators, isLoggedIn, licenseCode, ready]);
 
-  // ── Campanita: sondeo de pedidos nuevos (cada 15s) ─────────────────────
+  // ── Campanita: sondeo de pedidos (cada 8s). La nube manda para los pedidos
+  // ya existentes (para que admin y colaborador vean los cambios de estado),
+  // pero no se descartan pedidos locales que todavía no llegaron a la nube.
   useEffect(() => {
     if (!isLoggedIn || !licenseCode) return;
     const iv = setInterval(async () => {
       const blob = await cloudLoad(licenseCode);
       if (!blob) return;
       if (blob.orders) {
+        const cloudOrders = blob.orders as Order[];
+        const cloudIds = new Set(cloudOrders.map(o => o.id));
         setOrders(prev => {
-          if (JSON.stringify(prev) === JSON.stringify(blob.orders)) return prev;
-          const nuevos = (blob.orders as Order[]).filter(no => !prev.some(po => po.id === no.id));
+          const localOnly = prev.filter(o => !cloudIds.has(o.id));
+          const merged = [...cloudOrders, ...localOnly];
+          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+          const nuevos = cloudOrders.filter(no => !prev.some(po => po.id === no.id));
           if (prev.length && nuevos.length) {
             nuevos.forEach(no => {
-              const notif: AppNotification = {
+              triggerPushToast({
                 id: Math.random().toString(36).substring(7),
                 tenantId: licenseCode,
                 title: '🚨 Nuevo Pedido Encargado',
@@ -167,15 +190,14 @@ export default function App() {
                 createdAt: new Date().toISOString(),
                 orderId: no.id,
                 type: 'new_order',
-              };
-              triggerPushToast(notif);
+              });
             });
           }
-          return blob.orders as Order[];
+          return merged;
         });
       }
-      if (blob.notifications) setNotifications(blob.notifications);
-    }, 15000);
+      if (blob.notifications) setNotifications(blob.notifications as AppNotification[]);
+    }, 8000);
     return () => clearInterval(iv);
   }, [isLoggedIn, licenseCode]);
 

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { Tenant, Product, Order, Client, AppNotification, AdminTab, Collaborator } from '../types';
 import { THEME_PRESETS, FONT_PRESETS } from '../data';
 import { validarLicencia, asegurarCuentaSeguraDueno, asegurarCuentaSeguraColab } from '../db/cloud';
+import { bioSupported, bioEnabled, bioEnable, bioLogin } from '../db/biometric';
 import { 
   BarChart3, 
   Layers, 
@@ -124,6 +125,16 @@ export default function AdminPanel({
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+
+  // Ingreso biométrico (huella / Face ID) en este dispositivo
+  const [bioAvail, setBioAvail] = useState(false);
+  const [bioOn, setBioOn] = useState(false);
+  const [bioCheck, setBioCheck] = useState(false);
+
+  useEffect(() => {
+    bioSupported().then(setBioAvail);
+    setBioOn(bioEnabled());
+  }, []);
 
   // Habilita el botón "Eliminar Historial" recién después de bajar el Excel
   const [historialDescargado, setHistorialDescargado] = useState(false);
@@ -462,6 +473,17 @@ export default function AdminPanel({
     setIsProductModalOpen(false);
   };
 
+  // Login real reutilizable (formulario y huella)
+  const doLogin = async (codigo: string, usuario: string, pass: string, role: 'admin' | 'colaborador') => {
+    const lic = await validarLicencia(codigo);
+    if (!lic) return { ok: false, msg: 'Licencia inválida, inexistente o vencida.' };
+    const res = role === 'admin'
+      ? await asegurarCuentaSeguraDueno(usuario, pass, codigo)
+      : await asegurarCuentaSeguraColab(usuario, pass, codigo);
+    if (!res.ok) return { ok: false, msg: res.msg || 'No se pudo iniciar sesión.' };
+    return { ok: true };
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -477,32 +499,48 @@ export default function AdminPanel({
 
     setLoginLoading(true);
     try {
-      // 1) La licencia debe existir, estar activa y no vencida
-      const lic = await validarLicencia(codigo);
-      if (!lic) {
-        setLoginError('Licencia inválida, inexistente o vencida.');
+      const r = await doLogin(codigo, usuario, pass, loginRole);
+      if (!r.ok) {
+        setLoginError(r.msg || 'No se pudo iniciar sesión.');
         return;
       }
 
-      // 2) Cuenta segura real (Supabase Auth) según rol
-      const res = loginRole === 'admin'
-        ? await asegurarCuentaSeguraDueno(usuario, pass, codigo)
-        : await asegurarCuentaSeguraColab(usuario, pass, codigo);
-
-      if (!res.ok) {
-        setLoginError(res.msg || 'No se pudo iniciar sesión.');
-        return;
+      // Si tildó "activar huella", la registramos en este equipo
+      if (bioCheck && bioAvail) {
+        try {
+          await bioEnable({ codigo, usuario, password: pass, role: loginRole });
+          setBioOn(true);
+        } catch (e) { /* si la huella falla, igual entra */ }
       }
 
-      onLogin({
-        role: loginRole,
-        username: usuario,
-        name: usuario,
-        codigo,
-      });
+      onLogin({ role: loginRole, username: usuario, name: usuario, codigo });
       if (loginRole === 'colaborador') setActiveTab('orders');
     } catch (err: any) {
       setLoginError('Error de conexión: ' + (err?.message || err));
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  // Ingreso con huella / Face ID: recupera las credenciales guardadas y loguea
+  const handleBioLogin = async () => {
+    setLoginError('');
+    setLoginLoading(true);
+    try {
+      const creds = await bioLogin();
+      if (!creds) {
+        setLoginError('No se pudo leer la huella. Ingresá con tus datos.');
+        return;
+      }
+      const r = await doLogin(creds.codigo, creds.usuario, creds.password, creds.role);
+      if (!r.ok) {
+        setLoginError((r.msg || 'No se pudo entrar') + ' — volvé a ingresar tus datos.');
+        return;
+      }
+      onLogin({ role: creds.role, username: creds.usuario, name: creds.usuario, codigo: creds.codigo });
+      if (creds.role === 'colaborador') setActiveTab('orders');
+    } catch (err: any) {
+      setLoginError('Huella cancelada o no disponible en este dispositivo.');
     } finally {
       setLoginLoading(false);
     }
@@ -658,6 +696,25 @@ export default function AdminPanel({
             <p className="text-xs text-slate-400">Acceso exclusivo para comerciantes y colaboradores autorizados</p>
           </div>
 
+          {/* Ingreso rápido con huella / Face ID (si está activado en este equipo) */}
+          {bioAvail && bioOn && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={handleBioLogin}
+                disabled={loginLoading}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Smartphone className="w-4 h-4" /> Ingresar con huella / Face ID
+              </button>
+              <div className="flex items-center gap-2 my-3">
+                <span className="flex-1 h-px bg-slate-800"></span>
+                <span className="text-[10px] text-slate-500 uppercase">o con tus datos</span>
+                <span className="flex-1 h-px bg-slate-800"></span>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleLoginSubmit} className="space-y-4">
             {/* Role select tabs */}
             <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
@@ -748,6 +805,22 @@ export default function AdminPanel({
               <p className="text-[11px] font-bold text-red-400 bg-red-950/40 p-2.5 rounded-lg border border-red-900/30 animate-fade-in leading-normal">
                 ⚠️ {loginError}
               </p>
+            )}
+
+            {/* Activar huella en este equipo */}
+            {bioAvail && !bioOn && (
+              <label className="flex items-start gap-2 text-[11px] text-slate-300 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={bioCheck}
+                  onChange={(e) => setBioCheck(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-emerald-600"
+                />
+                <span>
+                  🔒 <strong className="text-slate-200">Activar ingreso con huella / Face ID</strong> en este dispositivo,
+                  para no volver a tipear las credenciales.
+                </span>
+              </label>
             )}
 
             {/* Submit */}

@@ -150,13 +150,12 @@ export default function App() {
         return [...(locales || []), ...((remotos || []).filter(o => !ids.has(o.id)))];
       };
       const ordersMerged = unir(orders, nube?.orders || []);
-      const notifsMerged = unir(notifications, nube?.notifications || []);
       const clientsMerged = unir(clients, nube?.clients || []);
       await cloudSave(licenseCode, {
         tenant, products,
         orders: ordersMerged,
         clients: clientsMerged,
-        notifications: notifsMerged,
+        notifications, // autoritativo: si el usuario borra la campanita, se borra de verdad
         collaborators,
       });
     }, 800);
@@ -196,7 +195,8 @@ export default function App() {
           return merged;
         });
       }
-      if (blob.notifications) setNotifications(blob.notifications as AppNotification[]);
+      // Nota: las notificaciones NO se re-sincronizan desde la nube, para que
+      // "Borrar Todo" en la campanita quede borrado y no reaparezca.
     }, 8000);
     return () => clearInterval(iv);
   }, [isLoggedIn, licenseCode]);
@@ -402,6 +402,18 @@ export default function App() {
   const handleMarkNotificationsRead = () => saveNotifications(notifications.map(n => ({ ...n, isRead: true })));
   const handleClearNotificationsForTenant = () => saveNotifications([]);
 
+  // Eliminar historial: borra las ventas concluidas y lo escribe autoritativo
+  // en la nube (para que no reaparezcan por la fusión de pedidos).
+  const handleDeleteHistory = async () => {
+    const remaining = orders.filter(o => o.status !== 'completed');
+    setOrders(remaining);
+    if (licenseCode) {
+      await cloudSave(licenseCode, {
+        tenant, products, orders: remaining, clients, notifications, collaborators,
+      });
+    }
+  };
+
   // ── Loader ────────────────────────────────────────────────────────────
   if (!ready) {
     return (
@@ -465,6 +477,7 @@ export default function App() {
             onUpdateCollaborator={(colab) => saveCollaborators(collaborators.map(c => c.id === colab.id ? colab : c))}
             notifications={notifications}
             onClearNotifications={handleClearNotificationsForTenant}
+            onDeleteHistory={handleDeleteHistory}
             onTogglePreviewMode={() => setCurrentView('preview')}
             isLoggedIn={isLoggedIn}
             loggedInUser={loggedInUser}

@@ -54,6 +54,7 @@ interface AdminPanelProps {
   onUpdateCollaborator: (colab: Collaborator) => void;
   notifications: AppNotification[];
   onClearNotifications: () => void;
+  onDeleteHistory?: () => void;
   onTogglePreviewMode?: () => void;
   isLoggedIn: boolean;
   loggedInUser: { role: 'admin' | 'colaborador'; username: string; name: string; codigo?: string } | null;
@@ -78,6 +79,7 @@ export default function AdminPanel({
   onUpdateCollaborator,
   notifications,
   onClearNotifications,
+  onDeleteHistory,
   onTogglePreviewMode,
   isLoggedIn,
   loggedInUser,
@@ -122,6 +124,9 @@ export default function AdminPanel({
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+
+  // Habilita el botón "Eliminar Historial" recién después de bajar el Excel
+  const [historialDescargado, setHistorialDescargado] = useState(false);
 
   // --- COLLABORATORS FORM STATE ---
   const [colabName, setColabName] = useState('');
@@ -539,6 +544,8 @@ export default function AdminPanel({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setHistorialDescargado(true);
+    showAdminToast('Planilla Excel descargada. Ya podés eliminar el historial si querés.', 'success');
   };
 
   // Print highly styled order summary acting as PDF invoice
@@ -1607,6 +1614,29 @@ export default function AdminPanel({
                       className="flex items-center gap-1 px-3 py-1.5 bg-slate-950 hover:bg-slate-900 text-slate-300 rounded-lg text-xs font-bold border border-slate-800 cursor-pointer"
                     >
                       <Download className="w-3.5 h-3.5 text-indigo-400" /> Planilla Excel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!historialDescargado) return;
+                        showConfirm(
+                          'Eliminar historial de ventas',
+                          'Se van a borrar todas las ventas concluidas de forma permanente. Ya descargaste la planilla, así que tenés el respaldo. ¿Continuar?',
+                          () => {
+                            onDeleteHistory && onDeleteHistory();
+                            setHistorialDescargado(false);
+                            showAdminToast('Historial de ventas eliminado.', 'success');
+                          }
+                        );
+                      }}
+                      disabled={!historialDescargado}
+                      title={historialDescargado ? 'Eliminar historial de ventas' : 'Primero descargá la Planilla Excel'}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors ${
+                        historialDescargado
+                          ? 'bg-red-950 hover:bg-red-900 text-red-300 border-red-900/40'
+                          : 'bg-slate-950 text-slate-600 border-slate-800 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Eliminar Historial
                     </button>
                   </div>
                 </div>

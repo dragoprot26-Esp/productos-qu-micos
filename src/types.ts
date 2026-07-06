@@ -61,6 +61,8 @@ export interface Order {
   deliveryType: 'delivery' | 'pickup';
   status: 'pending' | 'preparing' | 'ready_or_shipped' | 'completed' | 'cancelled';
   createdAt: string; // ISO String
+  atendidoPor?: string;      // usuario que gestionó/entregó el pedido
+  atendidoPorRol?: string;   // 'Dueño' o 'Vendedor'
 }
 
 export interface Client {

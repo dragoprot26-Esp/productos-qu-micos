@@ -6,7 +6,7 @@ import AdminPanel from './components/AdminPanel';
 import { Bell, Sparkles, X } from 'lucide-react';
 import {
   estaLogueado, miMembresia, cloudLoad, cloudSave,
-  quimPublica, quimAgregarPedido, signOutGlobal,
+  quimPublica, quimAgregarPedido, quimVersion, signOutGlobal,
 } from './db/cloud';
 
 // ── Plantillas (una tienda por licencia) ────────────────────────────────
@@ -167,7 +167,11 @@ export default function App() {
   // pero no se descartan pedidos locales que todavía no llegaron a la nube.
   useEffect(() => {
     if (!isLoggedIn || !licenseCode) return;
+    let lastVer = '';
     const iv = setInterval(async () => {
+      const ver = await quimVersion(licenseCode);
+      if (!ver || ver === lastVer) return; // nada cambió → no baja imágenes
+      lastVer = ver;
       const blob = await cloudLoad(licenseCode);
       if (!blob) return;
       if (blob.orders) {
@@ -197,7 +201,7 @@ export default function App() {
       }
       // Nota: las notificaciones NO se re-sincronizan desde la nube, para que
       // "Borrar Todo" en la campanita quede borrado y no reaparezca.
-    }, 8000);
+    }, 30000);
     return () => clearInterval(iv);
   }, [isLoggedIn, licenseCode]);
 

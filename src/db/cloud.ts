@@ -206,3 +206,8 @@ export async function quimPublica(codigo: string): Promise<CloudData | null> {
 export async function quimAgregarPedido(codigo: string, pedido: any): Promise<void> {
   try { await rpc('quim_agregar_pedido', { p_codigo: codigo, p_pedido: pedido }, false); } catch (e) { /* noop */ }
 }
+
+export async function quimVersion(codigo: string): Promise<string> {
+  try { const r = await rpc('quim_version', { p_codigo: codigo }, false); return typeof r === 'string' ? r : String(r || ''); }
+  catch (e) { return ''; }
+}

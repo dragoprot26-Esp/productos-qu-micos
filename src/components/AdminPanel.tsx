@@ -3,6 +3,7 @@ import { Tenant, Product, Order, Client, AppNotification, AdminTab, Collaborator
 import { THEME_PRESETS, FONT_PRESETS } from '../data';
 import { validarLicencia, asegurarCuentaSeguraDueno, asegurarCuentaSeguraColab } from '../db/cloud';
 import { bioSupported, bioEnabled, bioEnable, bioLogin } from '../db/biometric';
+import { comprimirImagen } from '../img';
 import { 
   BarChart3, 
   Layers, 
@@ -2139,13 +2140,7 @@ export default function AdminPanel({
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  if (event.target?.result) {
-                                    setBrandLogo(event.target.result as string);
-                                  }
-                                };
-                                reader.readAsDataURL(file);
+                                comprimirImagen(file, 800, 0.8).then((r) => { if (r) setBrandLogo(r); });
                               }
                             }}
                           />
@@ -2557,13 +2552,7 @@ export default function AdminPanel({
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (event) => {
-                              if (event.target?.result) {
-                                setProdImg(event.target.result as string);
-                              }
-                            };
-                            reader.readAsDataURL(file);
+                            comprimirImagen(file, 1000, 0.72).then((r) => { if (r) setProdImg(r); });
                           }
                         }}
                       />
